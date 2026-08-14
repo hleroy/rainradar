@@ -94,8 +94,46 @@ d. Determine whether any of those changes touch **what this project actually use
    tags, or config keys. **A breaking change the project never exercises is not
    relevant — say so explicitly**, naming what you grepped for and that it was absent.
 
-If the changelog for a range cannot be found at all, that is REVIEW NEEDED. Never
-substitute an assumption ("patch bumps are usually fine") for step (b).
+Never substitute an assumption ("patch bumps are usually fine") for step (b).
+
+### When there is no changelog, diff the artifacts
+
+A missing changelog is not the end of the research — it is the point where you stop
+reading *about* the release and read the release itself. Upstream prose is secondary
+evidence anyway; the published artifact is what actually gets installed, and for a
+pure-Python package it is a zip you can unpack in seconds.
+
+Prefer this over inferring the change from repository commits. An untagged release
+cannot be tied to any particular commit, so a commit-based reconstruction is a guess
+about what was published; the artifact is not.
+
+```python
+# Fetch and unpack both versions' wheels from PyPI, then diff the module.
+import io, json, urllib.request, zipfile, pathlib
+d = json.load(urllib.request.urlopen("https://pypi.org/pypi/<pkg>/json"))
+for v in ("<old>", "<new>"):
+    url = next(f["url"] for f in d["releases"][v] if f["packagetype"] == "bdist_wheel")
+    zipfile.ZipFile(io.BytesIO(urllib.request.urlopen(url).read())).extractall(f"/tmp/{v}")
+```
+
+Then `diff -u` the package source between the two trees, and read three things:
+
+1. **The real behavioral changes.** Filter out the noise first — typing
+   modernization, docstring edits, formatting, and logging tweaks usually account for
+   most of a diff's line count and none of its risk. What remains is normally a
+   handful of lines, and is what the verdict turns on.
+2. **Renamed or moved internals.** An attribute or helper that changed name is a
+   breaking change for anyone who touches it, and it will never appear in release
+   notes framed as one. Grep this codebase for each.
+3. **`METADATA` / dependency floors.** Diff the `Requires-Dist` lines. A raised
+   floor on a transitive dependency is a common way an otherwise-inert release breaks
+   an install — check the new constraint against what `uv.lock` already pins.
+
+A bump verified this way can be SAFE TO MERGE despite having no changelog. Say in the
+comment that the evidence came from an artifact diff rather than release notes, and
+name the specific changes you found, so the verdict can be audited. If the artifact
+cannot be obtained or the diff shows changes whose impact you cannot resolve, it stays
+REVIEW NEEDED — this technique replaces a missing changelog, not the judgment.
 
 ## Step 3 — Weigh it against this repo's invariants
 
@@ -124,30 +162,29 @@ even when CI is green — the suite does not cover everything:
 
 Green checks are evidence only about code the suite genuinely exercises. Before
 leaning on `ci / tests` to clear a dependency, check whether the tests **mock that
-dependency out** — grep for `monkeypatch`, `respx`, or a stubbed module against the
-package's import site. If they do, the green check says nothing about the bump, and
-the burden falls entirely on step 2's research.
+dependency out**: grep the suite for `monkeypatch`, `respx`, or a stubbed module
+aimed at the package's import site. This suite mocks all external HTTP by design and
+patches some network-facing helpers wholesale, so for those dependencies a green run
+is not weak evidence — it is *no* evidence, and the burden falls entirely on step 2.
 
-`pywebpush` is the standing example: `radar/tests/test_alerts_evaluator.py`
-monkeypatches `radar.alerts.webpush.send` wholesale, so **no** pywebpush change can
-ever fail CI here. External HTTP is mocked with `respx` throughout for the same
-reason. Treat a dependency in that position as needing stronger changelog evidence
-than one the suite really runs.
+The intuition to guard against is the comfortable one: a dependency the tests cannot
+touch needs **stronger** independent evidence than one they really run, not weaker.
 
 ## Step 4 — Classify
 
 **SAFE TO MERGE** — all of:
 - every check green, `MERGEABLE` and `CLEAN`;
 - every constituent is a **patch or minor** bump (never a major);
-- step 2 completed for each, with the changelog actually read;
+- step 2 completed for each — the changelog actually read, or, where none exists, the
+  artifact diffed;
 - no breaking/deprecated/default change that this codebase exercises;
 - touches none of the invariants above;
 - not a ruff PR.
 
 **REVIEW NEEDED** — anything unresolved rather than known-bad: a major bump, a ruff
-bump, an unreachable or ambiguous changelog, a behavioral change whose impact you
-cannot rule out, a failing-but-plausibly-flaky check, or an invariant that needs a
-human eye.
+bump, a release whose content you could establish from neither notes nor artifact, a
+behavioral change whose impact you cannot rule out, a failing-but-plausibly-flaky
+check, or an invariant that needs a human eye.
 
 **DO NOT MERGE** — known-bad: a breaking change this project demonstrably uses, an
 interpreter/base-image violation, a security regression, a check failing for a real
