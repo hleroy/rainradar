@@ -63,8 +63,27 @@ updates:
     # Every weekday
     schedule:
       interval: 'daily'
+    # `ruff` is pinned in TWO places that must move together — `pyproject.toml`
+    # and the `ruff-pre-commit` rev in `.pre-commit-config.yaml` — and the uv
+    # ecosystem only sees the first, so every ruff bump desyncs the pair (the
+    # older --fix hook then strips waivers the newer CI ruff needs). Patch bumps
+    # are pure churn against that cost, so they are ignored; anything larger
+    # gets its own PR via the `ruff` group below and is always triaged
+    # REVIEW NEEDED, because the pre-commit rev must be synced by hand.
+    # NOTE: ruff is pre-1.0 and Dependabot uses strict semver, so 0.16 -> 0.17
+    # is a *minor* update here, not a major one. Ignoring patch is what actually
+    # expresses "only significant ruff releases".
+    ignore:
+      - dependency-name: 'ruff'
+        update-types:
+          - 'version-update:semver-patch'
     groups:
       python:
+        exclude-patterns:
+          - 'ruff'
         update-types:
           - 'minor'
           - 'patch'
+      ruff:
+        patterns:
+          - 'ruff'
