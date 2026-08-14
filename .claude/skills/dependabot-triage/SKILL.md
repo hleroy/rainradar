@@ -9,14 +9,41 @@ Review every open Dependabot PR on `hleroy/rainradar`, classify it, and merge wh
 is genuinely safe. This runs unattended on a weekly schedule, so **the burden of
 proof is on merging** — when the evidence is thin, escalate rather than merge.
 
+## Tooling — check for `gh` first
+
+**The scheduled cloud sandbox has no `gh` CLI.** Run `which gh` before relying on it.
+Both paths below are supported; the verdicts and the hard rules are identical either
+way, only the transport differs.
+
+| Operation | With `gh` (local) | Without `gh` (cloud routine) |
+|---|---|---|
+| List open PRs | `gh pr list --author 'app/dependabot' --state open --json number,title,url` | `mcp__github__list_pull_requests` (`state: "open"`, then filter to `app/dependabot` yourself) |
+| PR facts | `gh pr view <n> --json …` | `mcp__github__pull_request_read` `method: "get"` |
+| Check runs | (included in `statusCheckRollup`) | `mcp__github__pull_request_read` `method: "get_check_runs"` |
+| Changed files | `gh pr diff <n> --name-only` | `mcp__github__pull_request_read` `method: "get_files"` |
+| Label | `gh api -X POST repos/hleroy/rainradar/issues/<n>/labels -f 'labels[]=<verdict>'` | `mcp__github__issue_write` `method: "update"` |
+| Comment | `gh pr comment <n> --body "…"` | `mcp__github__add_issue_comment` |
+| Merge | `gh pr merge <n> --squash` | `mcp__github__merge_pull_request` (`merge_method: "squash"`) |
+
+Four traps worth knowing before you hit them:
+
+- **`mcp__github__issue_write` replaces the whole label set**, it does not add to it.
+  Read the PR's current labels first and pass them back together with the verdict
+  label, or you will silently strip `dependencies` / `python:uv`.
+- **`get_files` on a lockfile-heavy PR overflows the token limit** and gets spilled to
+  a file. Don't try to read it back whole — `grep -oE '"filename":"[^"]+"'` over the
+  saved path is enough, since only the file list matters here.
+- **Don't use `gh pr edit --add-label` locally.** The pinned `gh` 2.45 fails on it with
+  a Projects-classic GraphQL deprecation error. The `gh api` form in the table works.
+- **A `403 Resource not accessible by integration` means the GitHub App installation
+  does not cover this repo** — not that the rubric forbids the write. Reads keep
+  working, which makes it look like a permissions subtlety rather than a scope
+  mistake. Report it plainly and leave the verdict unapplied; never work around it.
+
 ## Scope
 
 Only PRs authored by `app/dependabot`. Never touch a human-authored PR: do not
 label it, comment on it, or merge it.
-
-```bash
-gh pr list --author 'app/dependabot' --state open --json number,title,url
-```
 
 If there are none, send the push notification saying so and stop.
 
@@ -24,7 +51,7 @@ If there are none, send the push notification saying so and stop.
 
 These override every verdict below.
 
-- **Never merge into anything but `main` via squash.** Use `gh pr merge <n> --squash`.
+- **Never merge into anything but `main` via squash.** Squash is the only merge method.
 - **Never push commits to a Dependabot branch.** If a PR needs a code change to be
   correct, that is REVIEW NEEDED — describe the change, do not make it.
 - **Never modify `dependabot.yml`, workflows, or project files** during triage.
@@ -39,12 +66,8 @@ These override every verdict below.
 
 ## Step 1 — Gather the facts
 
-For each PR:
-
-```bash
-gh pr view <n> --json title,body,url,labels,mergeable,mergeStateStatus,statusCheckRollup,commits
-gh pr diff <n> --name-only
-```
+For each PR, read its facts, its check runs and its changed files (see the tooling
+table for the call that fits your environment).
 
 Record: every constituent dependency with its **exact old → new version**, the files
 touched, mergeability (`MERGEABLE` + `CLEAN`), and the conclusion of each check
@@ -97,6 +120,20 @@ even when CI is green — the suite does not cover everything:
 - **github-actions** — a major bump of an action can silently change defaults; verify
   against `tests.yml` / `deploy.yml` usage.
 
+### Ask what CI can actually see
+
+Green checks are evidence only about code the suite genuinely exercises. Before
+leaning on `ci / tests` to clear a dependency, check whether the tests **mock that
+dependency out** — grep for `monkeypatch`, `respx`, or a stubbed module against the
+package's import site. If they do, the green check says nothing about the bump, and
+the burden falls entirely on step 2's research.
+
+`pywebpush` is the standing example: `radar/tests/test_alerts_evaluator.py`
+monkeypatches `radar.alerts.webpush.send` wholesale, so **no** pywebpush change can
+ever fail CI here. External HTTP is mocked with `respx` throughout for the same
+reason. Treat a dependency in that position as needing stronger changelog evidence
+than one the suite really runs.
+
 ## Step 4 — Classify
 
 **SAFE TO MERGE** — all of:
@@ -121,17 +158,13 @@ reason, or a conflicted branch.
 Every triaged PR gets exactly one label — `safe-to-merge`, `review-needed`, or
 `do-not-merge` — plus one comment. Remove any of the other two if present.
 
-```bash
-gh pr edit <n> --add-label '<verdict>' --remove-label '<other>'
-gh pr comment <n> --body "$(cat <<'EOF'
-...comment markdown...
-EOF
-)"
-```
+Apply both with the calls from the tooling table. When labelling via
+`mcp__github__issue_write`, remember it **replaces** the label set: pass the PR's
+existing labels back alongside the verdict label, minus any of the other two verdicts.
 
-Pass the comment inline via a heredoc as above. Do not write it to a file first —
-this routine runs without file-write tools by design, so that it cannot modify the
-working tree.
+Pass the comment body inline (a `gh` heredoc, or the MCP tool's `body` argument). Do
+not write it to a file first — this routine runs without file-write tools by design,
+so that it cannot modify the working tree.
 
 The comment must carry the reasoning, not just the verdict:
 
@@ -156,16 +189,13 @@ thin, say so rather than implying research that did not happen.
 
 ## Step 6 — Merge the safe ones
 
-Only for PRs labeled `safe-to-merge` in this run:
-
-```bash
-gh pr merge <n> --squash
-```
+Only for PRs labeled `safe-to-merge` in this run, squash-merging via the call from the
+tooling table.
 
 The PR title is the squashed subject on `main`, so **verify it is a valid
-Conventional Commit** first (`build(deps): …` is what Dependabot produces, and
-`build` is an allowed type). If the title is not conventional, downgrade to
-REVIEW NEEDED instead of merging — do not rename a Dependabot PR.
+Conventional Commit** first (Dependabot produces `build(deps): …` or `chore(deps): …`,
+both allowed types). If the title is not conventional, downgrade to REVIEW NEEDED
+instead of merging — do not rename a Dependabot PR.
 
 Merge one at a time and re-check the next PR's mergeability afterwards: an earlier
 merge can put a later PR behind `main` and make it dirty. A PR that goes stale
