@@ -1,0 +1,82 @@
+name: Tests
+
+on:
+  workflow_call:
+
+# Dockerized for reproducibility — the same containerized path as `just pytest`.
+env:
+  COMPOSE_FILE: docker-compose.local.yml
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # docker-compose.local.yml declares these two as `env_file`, and `.gitignore`
+      # excludes `.envs/*` — a developer's real METEOFRANCE_APPLICATION_ID lives in
+      # the local one, so it must stay untracked. That left the runner with no env
+      # files at all and every `docker compose run` failing before it started.
+      #
+      # Values are deliberately throwaway: the suite runs on config.settings.test and
+      # mocks all upstream HTTP with respx, so nothing here reaches a real service.
+      # METEOFRANCE_APPLICATION_ID is present only because config.settings.local runs
+      # the fail-fast credential guard, and the migration check loads that module.
+      - name: Synthesise the dev env files
+        run: |
+          mkdir -p .envs/.local
+          cat > .envs/.local/.django <<'EOF'
+          DJANGO_SETTINGS_MODULE=config.settings.local
+          DJANGO_SECRET_KEY=ci-throwaway-not-a-real-secret
+          DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1
+          METEOFRANCE_APPLICATION_ID=Y2k6Y2k=
+          EOF
+          cat > .envs/.local/.postgres <<'EOF'
+          POSTGRES_HOST=postgres
+          POSTGRES_PORT=5432
+          POSTGRES_DB=rainradar
+          POSTGRES_USER=ci
+          POSTGRES_PASSWORD=ci
+          EOF
+
+      - name: Build django image
+        run: docker compose build django
+
+      # The steps above all build the LOCAL image, so nothing here would otherwise
+      # exercise compose/production/*. That left the deploy host as the first place
+      # a production-only build error could surface — and it did: enabling
+      # METEOFRANCE_ENABLED broke the django image's build-time collectstatic (it
+      # imports config.settings.production, which runs the fail-fast credential
+      # guards) while every CI check stayed green.
+      #
+      # Built with plain `docker build` rather than
+      # `docker compose -f docker-compose.production.yml build`: that file declares
+      # `.envs/.production/*` as env_file, which compose requires at parse time, and
+      # synthesising fake production secrets to satisfy it buys nothing. The images
+      # are discarded — this step asks only "would the host's build succeed?".
+      - name: Build production images
+        run: |
+          for svc in django postgres nginx; do
+            docker build -f "compose/production/$svc/Dockerfile" -t "rainradar-prod-ci-$svc" .
+          done
+
+      # ruff needs no services; skip deps and the DB-waiting entrypoint.
+      - name: ruff check
+        run: docker compose run --rm --no-deps --entrypoint ruff django check .
+
+      # Catch model/migration drift (the project now has real models). The check
+      # compares models to migration files and never connects to the DB, so
+      # bypass the entrypoint's postgres wait (like the ruff step) — otherwise
+      # --no-deps leaves postgres down and wait-for-it times out.
+      - name: Check for missing migrations
+        run: >-
+          docker compose run --rm --no-deps --entrypoint python django
+          manage.py makemigrations --check --dry-run
+
+      # pytest runs against the compose-managed postgres + redis (started via
+      # depends_on). The entrypoint exports DATABASE_URL from POSTGRES_* and
+      # waits for Postgres before exec'ing the command.
+      - name: Run tests with coverage (fail under 85% on radar/)
+        run: >-
+          docker compose run --rm django
+          sh -c "coverage run -m pytest && coverage report --fail-under=85"

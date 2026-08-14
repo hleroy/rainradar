@@ -1,0 +1,50 @@
+name: PR Title
+
+# Enforce Conventional Commits on the PR *title*. We land every PR via
+# squash-rebase, so the PR title becomes the squashed commit's subject on
+# `main` (GitHub appends the `(#NN)`). The local `commit-msg` hook
+# (conventional-pre-commit) only validates individual local commits and never
+# runs at all for PRs opened from Claude Code on the web — so the PR title is
+# the one thing that actually reaches `main` yet has no local gate. This is it.
+#
+# Keep the allowed `types` in sync with the conventional-pre-commit hook in
+# .pre-commit-config.yaml.
+
+on:
+  pull_request_target:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  pull-requests: read
+
+concurrency:
+  group: pr-title-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  conventional-title:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate PR title is a Conventional Commit
+        uses: amannn/action-semantic-pull-request@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # Must match .pre-commit-config.yaml's conventional-pre-commit args.
+          types: |
+            feat
+            fix
+            refactor
+            chore
+            docs
+            test
+            style
+            perf
+            ci
+            build
+            revert
+          # A scope is optional; reject an empty one like `feat(): x`.
+          requireScope: false
+          # Don't force a particular subject case (Conventional Commits itself
+          # doesn't mandate one); the type prefix is what we care about.
+          subjectPattern: '^.+$'

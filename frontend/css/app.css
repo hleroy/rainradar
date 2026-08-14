@@ -1,0 +1,1671 @@
+:root {
+  --panel-bg: rgba(255, 255, 255, 0.92);
+  --accent: #1e66f5;
+  --shadow: 0 1px 6px rgba(0, 0, 0, 0.3);
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+/* The inline <symbol> sprite in index.html. Hidden here rather than with a
+   style attribute — the production CSP is `style-src 'self'`, which also
+   governs style-src-attr, so an inline `display: none` is blocked and the
+   sprite renders as a blank block above the map. */
+.icon-sprite {
+  display: none;
+}
+
+#map {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+
+#topbar {
+  position: absolute;
+  top: 10px;
+  left: 50px;
+  right: 10px;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  pointer-events: none;
+}
+
+#topbar h1 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: #1c1c1c;
+  background: var(--panel-bg);
+  padding: 6px 12px;
+  border-radius: 6px;
+  box-shadow: var(--shadow);
+  pointer-events: auto;
+}
+
+/* Share/export action in the topbar: an icon button on its own panel, pushed to
+   the right so it and the language toggle form the app-level cluster. */
+#clip-btn {
+  margin-left: auto;
+  pointer-events: auto;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: var(--panel-bg);
+  box-shadow: var(--shadow);
+  color: #1c1c1c;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+#clip-btn:hover {
+  background: #e6e9ee;
+}
+
+#clip-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Language toggle: a two-state segment showing both locales, current highlighted. */
+#lang-toggle {
+  pointer-events: auto;
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border: none;
+  border-radius: 8px;
+  background: var(--panel-bg);
+  box-shadow: var(--shadow);
+  cursor: pointer;
+  font: inherit;
+}
+
+#lang-toggle span {
+  font-size: 11.5px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 5px 9px;
+  border-radius: 6px;
+  color: #5c636a;
+}
+
+#lang-toggle span.cur {
+  background: #f1f3f5;
+  color: #1c1c1c;
+}
+
+#lang-toggle:hover span:not(.cur) {
+  color: #1c1c1c;
+}
+
+#lang-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Transport bar: strictly time travel (LIVE, frame step/play, time + date,
+   calendar) over the scrubber. Map tools live in the #toolrail instead. */
+#controls {
+  position: absolute;
+  bottom: 34px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--panel-bg);
+  padding: 8px 12px 10px;
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  width: min(92vw, 560px);
+}
+
+#controls-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ctl-sep {
+  flex: none;
+  width: 1px;
+  align-self: stretch;
+  margin: 3px 4px;
+  background: #e4e7ec;
+}
+
+/* Shared button chrome for the transport bar and the tool rail. */
+#controls button,
+#toolrail button {
+  display: grid;
+  place-items: center;
+  flex: none;
+  min-width: 34px;
+  height: 34px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #1c1c1c;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+#controls button:hover,
+#toolrail button:hover {
+  background: #e6e9ee;
+}
+
+#controls button:focus-visible,
+#toolrail button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.icon {
+  display: block;
+  width: 20px;
+  height: 20px;
+}
+
+#controls-row .icon {
+  width: 18px;
+  height: 18px;
+}
+
+#controls #play-btn,
+#controls #datesheet-btn {
+  background: #f1f3f5;
+}
+
+#controls #play-btn:hover,
+#controls #datesheet-btn:hover {
+  background: #e6e9ee;
+}
+
+/* LIVE pill: blinking dot only while the cursor is ON the newest frame. Scrubbing,
+   stepping, or pausing the replay away from it drops the dot, which turns the pill
+   into the affordance for getting back (radar.js `following`). */
+#controls #live-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  background: #f1f3f5;
+  color: #5c636a;
+}
+
+#controls #live-btn::before {
+  content: "";
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.55;
+}
+
+#controls #live-btn[data-mode="live"] {
+  background: var(--accent);
+  color: #fff;
+}
+
+#controls #live-btn[data-mode="live"]::before {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  #controls #live-btn[data-mode="live"]::before {
+    animation: live-blink 1.6s ease-in-out infinite;
+  }
+}
+
+@keyframes live-blink {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* Time + date readout ("what moment am I looking at?"). */
+#time-block {
+  flex: 1;
+  min-width: 74px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1.15;
+  margin-left: 2px;
+  overflow: hidden;
+}
+
+#timestamp {
+  font-size: 15px;
+  font-weight: 600;
+  color: #1c1c1c;
+  font-variant-numeric: tabular-nums;
+}
+
+#time-sub {
+  min-height: 13px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #5c636a;
+  white-space: nowrap;
+}
+
+#nodata {
+  display: none;
+  color: #9b1c1c;
+}
+
+#nodata[data-show="true"] {
+  display: inline;
+}
+
+/* Scrubber: styled native range + window end labels + gap overlay + drag bubble. */
+#scrubber-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.scrub-lab {
+  flex: none;
+  min-width: 34px;
+  text-align: center;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #5c636a;
+  font-variant-numeric: tabular-nums;
+}
+
+#scrubber-wrap {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+}
+
+#scrubber {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 22px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+#scrubber:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+#scrubber:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* --scrub-pos (set from radar.js) paints the played portion of the track;
+   Firefox gets the same via ::-moz-range-progress. */
+#scrubber::-webkit-slider-runnable-track {
+  height: 5px;
+  border-radius: 3px;
+  background: linear-gradient(
+    to right,
+    var(--accent) 0 var(--scrub-pos, 100%),
+    #dde1e7 var(--scrub-pos, 100%) 100%
+  );
+}
+
+#scrubber::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 15px;
+  height: 15px;
+  margin-top: -5px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2.5px solid var(--accent);
+  box-shadow: 0 1px 4px rgba(15, 25, 40, 0.3);
+}
+
+#scrubber::-moz-range-track {
+  height: 5px;
+  border-radius: 3px;
+  background: #dde1e7;
+}
+
+#scrubber::-moz-range-progress {
+  height: 5px;
+  border-radius: 3px;
+  background: var(--accent);
+}
+
+#scrubber::-moz-range-thumb {
+  box-sizing: border-box;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2.5px solid var(--accent);
+  box-shadow: 0 1px 4px rgba(15, 25, 40, 0.3);
+}
+
+#gap-overlay {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 5px;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.gap-seg {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  background: repeating-linear-gradient(
+    45deg,
+    rgba(155, 28, 28, 0.55),
+    rgba(155, 28, 28, 0.55) 4px,
+    rgba(155, 28, 28, 0.25) 4px,
+    rgba(155, 28, 28, 0.25) 8px
+  );
+  border-radius: 2px;
+}
+
+/* Frame-time bubble that follows the thumb while dragging. */
+#scrub-bubble {
+  position: absolute;
+  bottom: calc(100% + 2px);
+  z-index: 5;
+  transform: translateX(-50%);
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: #1c2430;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+#scrub-bubble::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  transform: translateX(-50%);
+  border: 4px solid transparent;
+  border-top-color: #1c2430;
+}
+
+#scrub-bubble[hidden] {
+  display: none;
+}
+
+/* Tool rail: the lightning / locate / alerts state toggles — a vertical
+   Leaflet-style control on the right map edge. */
+#toolrail {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  background: var(--panel-bg);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+}
+
+#toolrail button {
+  position: relative;
+  width: 40px;
+  height: 40px;
+}
+
+#toolrail button[hidden] {
+  display: none;
+}
+
+/* One state language across the rail: accent = active/armed, red tint = blocked.
+   Amber survives only as the armed-alert anchor badge (and as lightning data on
+   the map itself) — it no longer paints whole buttons. */
+#lightning-btn[data-state="on"],
+#locate-btn[data-state="active"],
+#alert-btn[data-state="armed"] {
+  background: var(--accent);
+  color: #fff;
+}
+
+#lightning-btn[data-state="on"]:hover,
+#locate-btn[data-state="active"]:hover,
+#alert-btn[data-state="armed"]:hover {
+  background: var(--accent);
+}
+
+#alert-btn[data-state="armed"]::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #f5a623;
+  box-shadow: 0 0 0 1.5px #fff;
+}
+
+#locate-btn[data-state="blocked"],
+#alert-btn[data-state="blocked"] {
+  background: #f3d6d6;
+  color: #9b1c1c;
+}
+
+#locate-btn[data-state="blocked"] {
+  cursor: not-allowed;
+}
+
+/* Gear button holds a pressed tint while its popover is open. */
+#settings-btn[aria-expanded="true"] {
+  background: #e6e9ee;
+}
+
+/* Display-settings popover: NON-modal, anchored beside the tool rail (never over
+   the transport bar) so the map stays visible while the opacity slider is dragged. */
+#settings-panel {
+  position: absolute;
+  right: 64px; /* rail: right 12px + 40px button + 2×4px padding, + 4px gap */
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 1000;
+  width: min(250px, calc(100vw - 84px));
+  padding: 12px 14px;
+  background: var(--panel-bg);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  color: #1c1c1c;
+}
+
+#settings-panel[hidden] {
+  display: none;
+}
+
+.settings-row + .settings-row {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #e4e7ec;
+}
+
+#settings-panel label {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.settings-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+#setting-opacity {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+#setting-opacity-value {
+  flex: none;
+  min-width: 40px;
+  text-align: right;
+  font-size: 0.8rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: #5c636a;
+}
+
+.settings-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.settings-check input {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.settings-note {
+  margin: 4px 0 0 24px; /* aligned under the checkbox label text */
+  font-size: 0.75rem;
+  color: #5c636a;
+}
+
+/* Radar-source radio group: one option row per advertised provider. */
+.settings-label {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.settings-radios {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.settings-radio {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-weight: 400; /* options aren't headers; override the panel's bold label default */
+}
+
+.settings-radio input {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+/* Lightning dots overlay: never intercept map interactions. */
+.lightning-canvas {
+  position: absolute;
+  pointer-events: none;
+  z-index: 300;
+}
+
+/* Storm-alert button: placing gets a subtle pulse (motion-gated);
+   armed/blocked share the unified rail state rules above. */
+@media (prefers-reduced-motion: no-preference) {
+  #alert-btn[data-state="placing"] {
+    animation: clip-pulse 1.1s ease-in-out infinite;
+  }
+}
+
+/* Centered reticle the user pans the map beneath while placing an alert point. */
+#alert-crosshair {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px;
+  z-index: 1200;
+  border: 2px solid #0097a7;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.9), inset 0 0 0 1px rgba(255, 255, 255, 0.9);
+  pointer-events: none;
+}
+
+#alert-crosshair::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 4px;
+  height: 4px;
+  margin: -2px 0 0 -2px;
+  border-radius: 50%;
+  background: #0097a7;
+}
+
+#alert-crosshair[hidden] {
+  display: none;
+}
+
+/* Slim, non-modal hint bar during placement — the map stays fully draggable. */
+#alert-placebar {
+  position: absolute;
+  top: 58px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 94vw;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--panel-bg);
+  box-shadow: var(--shadow);
+  font-size: 0.9rem;
+  color: #1c1c1c;
+}
+
+#alert-placebar[hidden] {
+  display: none;
+}
+
+#alert-placebar button {
+  font: inherit;
+  font-weight: 600;
+  padding: 6px 12px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+#alert-confirm {
+  background: var(--accent);
+  color: #fff;
+}
+
+#alert-cancel {
+  background: #f1f3f5;
+  color: #1c1c1c;
+}
+
+/* Alert sheet action buttons (stacked, full-width). */
+.alert-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0.75rem 0;
+}
+
+.alert-actions button {
+  font: inherit;
+  font-weight: 600;
+  padding: 10px 14px;
+  border: none;
+  border-radius: 8px;
+  background: #f1f3f5;
+  color: #1c1c1c;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.alert-actions button:hover {
+  background: #e2e6ea;
+}
+
+#alert-my-position,
+#alert-confirm {
+  background: var(--accent);
+  color: #fff;
+}
+
+#alert-my-position:hover {
+  filter: brightness(1.08);
+  background: var(--accent);
+}
+
+#alert-disable {
+  background: #f3d6d6;
+  color: #9b1c1c;
+}
+
+#alert-disclaimer,
+.alert-fineprint {
+  margin: 0.75rem 0 0;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: #5c636a;
+}
+
+#alert-push-status {
+  margin: 0.75rem 0 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #1c1c1c;
+}
+
+#alert-status {
+  margin: 0.5rem 0;
+  line-height: 1.5;
+}
+
+/* Video export / share button: lives in the topbar chrome; dims while a
+   render is in flight, with a subtle pulse (motion-gated). */
+#clip-btn[data-state="rendering"] {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  #clip-btn[data-state="rendering"] {
+    animation: clip-pulse 1.1s ease-in-out infinite;
+  }
+}
+
+@keyframes clip-pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+/* Small, unobtrusive progress readout shown while the clip renders — a plain
+   text line inside the transport bar (the bar already carries the chrome). */
+#clip-progress {
+  align-self: center;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #5c636a;
+  font-variant-numeric: tabular-nums;
+}
+
+#clip-progress[hidden] {
+  display: none;
+}
+
+#toast {
+  position: absolute;
+  bottom: 150px; /* clear of the transport bar */
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1100;
+  max-width: 80vw;
+  padding: 10px 16px;
+  border-radius: 8px;
+  background: rgba(20, 20, 20, 0.9);
+  color: #fff;
+  font-size: 0.9rem;
+  box-shadow: var(--shadow);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+
+#toast[data-show="true"] {
+  opacity: 1;
+}
+
+/* About dialog. The title is an unstyled button so it reads as the
+   heading text while being a real, focusable activator. */
+#about-trigger {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#about-trigger .icon {
+  width: 14px;
+  height: 14px;
+  color: #5c636a;
+}
+
+#about-trigger:hover {
+  text-decoration: underline;
+}
+
+#about-trigger:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+.about-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000; /* above the map, controls, toast and all Leaflet panes */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.about-overlay[hidden] {
+  display: none;
+}
+
+/* Shared panel chrome for both in-page modals (About; the date-navigation
+   sheet below): white rounded card, own scroll region, close button in the
+   same corner. Per-dialog rules (content-specific spacing, sizing) stay under
+   their own #id selectors. */
+.modal-panel {
+  position: relative;
+  background: #fff;
+  color: #1c1c1c;
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  padding: 20px 24px;
+  max-width: min(34rem, 92vw);
+  max-height: 85vh;
+  overflow-y: auto;
+}
+
+.modal-panel h2 {
+  margin: 0 2rem 0.5rem 0; /* keep clear of the close button */
+  font-size: 1.25rem;
+}
+
+.modal-close-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 40px;
+  height: 40px;
+  font-size: 1.5rem;
+  line-height: 1;
+  border: none;
+  border-radius: 8px;
+  background: #f1f3f5;
+  color: #1c1c1c;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.modal-close-btn:hover {
+  background: #e2e6ea;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+#about-body p {
+  margin: 0.5rem 0;
+  line-height: 1.5;
+}
+
+/* Default for any anchor in the prose; without this one it renders in the
+   browser's default blue/purple, the one unstyled thing in the dialog. Today the
+   byline below restyles both links it holds, but the intro strings are free to
+   grow a link and this keeps that from landing unstyled. */
+#about-body a {
+  color: var(--accent);
+  text-underline-offset: 2px;
+}
+
+/* Dialog masthead: the product's own mark, so the dialog opens on the app's
+   identity rather than a bare word. */
+.about-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 2.5rem 0.75rem 0; /* clear of the close button */
+}
+
+.about-mark {
+  flex: none;
+  width: 44px;
+  height: 44px;
+}
+
+.about-head h2 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.about-tagline {
+  margin: 2px 0 0;
+  font-size: 0.85rem;
+  color: #5c636a;
+}
+
+/* The readout: the only place the archive behind the map surfaces, so it gets a
+   hierarchy — is it alive, then the two counts that convey scale, then reference
+   rows — rather than one flat list where everything reads alike. It stays in the
+   app's light chrome; its two accents are lifted from the app's own icon. */
+#about-stats {
+  --ro-muted: #5c636a;
+  --ro-rule: #e2e6ea;
+  --ro-radar: var(--accent); /* favicon drops → radar */
+  --ro-bolt: #f5a623; /* favicon bolt → lightning */
+  margin-top: 1rem;
+  padding: 14px 16px 16px;
+  border: 1px solid var(--ro-rule);
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+#about-stats h3 {
+  margin: 0;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ro-muted);
+}
+
+/* Live line — the "is it actually running" answer, before any total. */
+#about-live {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 0;
+  font-size: 0.85rem;
+  color: var(--ro-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.about-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #b4bcc5;
+}
+
+.about-dot[data-live="true"] {
+  background: var(--ro-radar);
+  box-shadow: 0 0 0 0 rgba(30, 102, 245, 0.5);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .about-dot[data-live="true"] {
+    animation: about-pulse 2.4s ease-out infinite;
+  }
+}
+
+@keyframes about-pulse {
+  70% {
+    box-shadow: 0 0 0 7px rgba(30, 102, 245, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(30, 102, 245, 0);
+  }
+}
+
+#about-figures {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px 18px;
+  margin: 14px 0 0;
+}
+
+.about-figure {
+  display: grid;
+  gap: 1px;
+  padding-left: 10px;
+  border-left: 2px solid var(--ro-radar);
+}
+
+.about-figure[data-tone="bolt"] {
+  border-left-color: var(--ro-bolt);
+}
+
+.about-figure strong {
+  font-size: 1.45rem;
+  font-weight: 650;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.about-figure span {
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ro-muted);
+}
+
+.about-figure em {
+  font-style: normal;
+  font-size: 0.75rem;
+  color: var(--ro-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+#about-stats dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 16px;
+  margin: 14px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--ro-rule);
+  font-size: 0.85rem;
+}
+
+#about-stats dt {
+  color: var(--ro-muted);
+}
+
+#about-stats dd {
+  margin: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Per-provider rows: these split the frames figure above rather than standing on
+   their own, so they are set back and lightened to read as its children. The ↳ is
+   generated here, not written into the label — see addRow() in about.js. */
+#about-stats dt.about-sub::before {
+  content: "↳";
+  margin-right: 0.4em;
+  opacity: 0.55;
+}
+
+#about-stats .about-sub {
+  font-size: 0.95em;
+  opacity: 0.85;
+}
+
+#about-stats-error {
+  margin: 10px 0 0;
+  color: #9b1c1c;
+  font-size: 0.9rem;
+}
+
+/* Byline under the intro: author · source. Set smaller and muted so it signs the
+   prose instead of competing with the explainer teaser immediately below — at
+   body size in accent blue it read as the loudest thing in the dialog.
+   Qualified by #about-body: a bare class loses to `#about-body p` above, which
+   would take back the margin and (in the narrow breakpoint) the size. */
+#about-body .about-byline {
+  margin: 0.75rem 0 0;
+  font-size: 0.85rem;
+  color: var(--ro-muted);
+}
+
+/* Muted rather than accent, but underlined at rest: colour alone is not an
+   accessible affordance, and these must still read as links. */
+#about-body .about-byline a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--ro-rule);
+}
+
+#about-body .about-byline a:hover,
+#about-body .about-byline a:focus-visible {
+  color: var(--accent);
+  text-decoration-color: currentColor;
+}
+
+/* `white-space: nowrap` keeps "Code source sur GitHub" whole: broken across a
+   line the mark orphans from its label. Baseline nudge rather than inline-flex,
+   so the byline's two items still wrap as a unit if the dialog narrows. */
+.about-byline a.marked {
+  white-space: nowrap;
+}
+
+.gh-mark {
+  vertical-align: -2px;
+  margin-right: 5px;
+}
+
+/* The door to the standalone explainer — the one rich element in an otherwise
+   quiet dialog. */
+#about-explainer {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 22px; /* room for the sticker to overhang the top edge */
+  padding: 12px 16px 12px 12px;
+  border: 1px solid #dfe4ea;
+  border-radius: 12px;
+  background: #fff;
+  color: #1c1c1c;
+  text-decoration: none;
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.about-explainer-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0; /* let the text wrap instead of stretching the row */
+}
+
+.about-explainer-text strong {
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.about-explainer-text small {
+  font-size: 0.8rem;
+  color: #5c636a;
+}
+
+#about-explainer .icon {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin-left: auto;
+  color: var(--accent);
+  transition: transform 0.18s ease;
+}
+
+#about-explainer:hover,
+#about-explainer:focus-visible {
+  background: #f7faff;
+  border-color: var(--accent);
+  box-shadow: 0 2px 10px rgba(30, 102, 245, 0.1);
+}
+
+#about-explainer:hover .icon {
+  transform: translateX(3px);
+}
+
+#about-explainer:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* The miniature. Perspective lives on the box and each plane carries the whole
+   transform, so no preserve-3d chain is needed for four flat sheets. Same angles
+   as the full-size maquette on /apropos. Every length is scaled by --mini-scale
+   (perspective and the Z spread included, so the geometry is identical, only
+   smaller) — that is the one knob the phone layout turns. */
+.mini-stack {
+  --mini-scale: 1;
+  position: relative;
+  flex: none;
+  width: calc(104px * var(--mini-scale));
+  height: calc(104px * var(--mini-scale));
+  perspective: calc(520px * var(--mini-scale));
+  perspective-origin: 50% 46%;
+}
+
+/* Centre sits low in the box: the planes rise as they separate, so the headroom
+   has to cover the tallest spread plus a plane's own projected half-height —
+   otherwise the top layers climb out of the card on hover. */
+.mini-plane {
+  position: absolute;
+  left: 50%;
+  top: 58%;
+  width: calc(70px * var(--mini-scale));
+  height: calc(70px * var(--mini-scale));
+  margin: calc(-35px * var(--mini-scale)) 0 0 calc(-35px * var(--mini-scale));
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+  transform: rotateX(58deg) rotateZ(-34deg) translateZ(calc(var(--z, 0px) * var(--mini-scale)));
+  transition: transform 0.45s cubic-bezier(0.22, 0.9, 0.28, 1);
+}
+
+/* Only the map is a physical sheet; the weather layers are transparent films
+   over it, exactly as on the full page. */
+.mini-plane[data-layer="carte"] {
+  --z: 0px;
+  background-image: url("/static/img/apropos-mini-carte.webp");
+  border: 1px solid #d7dde3;
+  box-shadow: 0 6px 14px rgba(16, 24, 40, 0.18);
+}
+
+.mini-plane[data-layer="halo"] {
+  --z: 8px;
+  background-image: url("/static/img/apropos-mini-halo.webp");
+}
+
+.mini-plane[data-layer="pluie"] {
+  --z: 16px;
+  background-image: url("/static/img/apropos-mini-pluie.webp");
+}
+
+.mini-plane[data-layer="eclairs"] {
+  --z: 24px;
+  background-image: url("/static/img/apropos-mini-eclairs.webp");
+  /* Cyan on a pale map needs the same lift the full page gives its canvas. */
+  filter: drop-shadow(0 0 1px rgba(0, 60, 80, 0.75));
+}
+
+/* The invitation: the stack comes apart under the cursor. */
+#about-explainer:hover .mini-plane[data-layer="halo"] {
+  --z: 13px;
+}
+
+#about-explainer:hover .mini-plane[data-layer="pluie"] {
+  --z: 26px;
+}
+
+#about-explainer:hover .mini-plane[data-layer="eclairs"] {
+  --z: 39px;
+}
+
+/* Anchored to the card, not the stack: sat inside the stack it covered exactly
+   the layers that fan out on hover. Straddling the top edge also reads more like
+   a sticker actually stuck on. */
+.mini-sticker {
+  position: absolute;
+  top: -9px;
+  left: 14px;
+  transform: rotate(-7deg);
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #f5a623; /* favicon bolt */
+  color: #241a05;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  box-shadow: 0 1px 4px rgba(16, 24, 40, 0.28);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #about-explainer .icon,
+  .mini-plane {
+    transition: none;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .about-overlay {
+    animation: about-fade-in 0.15s ease;
+  }
+}
+
+@keyframes about-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Phone-sized: the dialog is effectively the whole screen, so its chrome gives
+   the width and the height back to the content. The intro and the readout drop to
+   small print deliberately — they are reference text, and at full size the intro
+   and the two figures alone filled the screen. The
+   miniature is scaled down rather than dropped: it is the only picture of what the
+   explainer link leads to, and the row it sits in has the height to spare. */
+@media (max-width: 480px) {
+  .about-overlay {
+    padding: 10px;
+  }
+
+  #about-dialog {
+    max-width: 96vw;
+    max-height: 90vh;
+    padding: 16px 14px;
+  }
+
+  .about-head {
+    gap: 10px;
+    margin-right: 2.75rem;
+    margin-bottom: 0.6rem;
+  }
+
+  .about-mark {
+    width: 36px;
+    height: 36px;
+  }
+
+  .about-head h2 {
+    font-size: 1.1rem;
+  }
+
+  .about-tagline {
+    font-size: 0.78rem;
+  }
+
+  #about-body p {
+    margin: 0.4rem 0;
+    font-size: 0.82rem;
+    line-height: 1.45;
+  }
+
+  /* Track the prose down: at the desktop 0.85rem the byline would outsize the
+     0.82rem body text here and stop reading as a signature. */
+  #about-body .about-byline {
+    margin-top: 0.6rem;
+    font-size: 0.76rem;
+  }
+
+  #about-explainer {
+    gap: 10px;
+    margin-top: 18px;
+    padding: 10px 12px 10px 10px;
+  }
+
+  .mini-stack {
+    --mini-scale: 0.62;
+  }
+
+  .about-explainer-text strong {
+    font-size: 0.85rem;
+  }
+
+  .about-explainer-text small {
+    font-size: 0.72rem;
+  }
+
+  #about-stats {
+    margin-top: 0.85rem;
+    padding: 12px 12px 13px;
+  }
+
+  #about-live {
+    margin-top: 8px;
+    font-size: 0.76rem;
+  }
+
+  #about-figures {
+    /* Pinned to two columns: auto-fit's 120px minimum no longer fits twice here,
+       so it fell back to one figure per row — two short numbers stacked into a
+       full screen of scrolling. */
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 12px;
+    margin-top: 11px;
+  }
+
+  .about-figure {
+    padding-left: 8px;
+  }
+
+  .about-figure strong {
+    font-size: 1.2rem;
+  }
+
+  .about-figure span {
+    font-size: 0.64rem;
+    letter-spacing: 0.06em;
+  }
+
+  .about-figure em {
+    font-size: 0.68rem;
+  }
+
+  #about-stats dl {
+    gap: 4px 12px;
+    margin-top: 11px;
+    padding-top: 10px;
+    font-size: 0.76rem;
+  }
+}
+
+/* Mobile: the same two surfaces re-cut for thumbs — ≥44px targets, safe-area
+   aware, and the mandatory attribution in its own always-visible strip at the
+   very bottom (nothing may cover the RainViewer/OSM/Blitzortung credits). */
+@media (max-width: 600px) {
+  /* Pinch covers zooming; one less control over a small map. */
+  .leaflet-control-zoom {
+    display: none;
+  }
+
+  #topbar {
+    left: 10px;
+    top: 10px;
+  }
+
+  #topbar h1 {
+    font-size: 0.9rem;
+    padding: 6px 10px;
+  }
+
+  /* Leaflet's attribution becomes a dedicated full-width strip under the bar,
+     padded past the home indicator. */
+  .leaflet-control-attribution {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 900;
+    margin: 0;
+    padding: 3px 8px calc(3px + env(safe-area-inset-bottom));
+    background: rgba(255, 255, 255, 0.9);
+    font-size: 10px;
+    line-height: 1.35;
+    text-align: center;
+    white-space: normal;
+  }
+
+  #controls {
+    left: 8px;
+    right: 8px;
+    bottom: calc(48px + env(safe-area-inset-bottom));
+    transform: none;
+    width: auto;
+    padding: 8px 10px 10px;
+    border-radius: 14px;
+  }
+
+  #controls-row {
+    gap: 4px;
+  }
+
+  .ctl-sep {
+    display: none;
+  }
+
+  #controls button {
+    min-width: 42px;
+    height: 42px;
+  }
+
+  #controls #live-btn {
+    padding: 0 9px;
+    font-size: 10.5px;
+  }
+
+  #time-block {
+    min-width: 0;
+    margin-left: 4px;
+  }
+
+  #timestamp {
+    font-size: 14.5px;
+  }
+
+  /* Tool rail sits above the bar on the right edge, in the thumb's reach arc. */
+  #toolrail {
+    top: auto;
+    transform: none;
+    right: 8px;
+    bottom: calc(150px + env(safe-area-inset-bottom));
+    border-radius: 12px;
+  }
+
+  #toolrail button {
+    width: 44px;
+    height: 44px;
+  }
+
+  /* The popover moves with the rail: bottom-aligned with it (i.e. sitting just
+     above the transport bar, never covering it), opening to the rail's left. */
+  #settings-panel {
+    top: auto;
+    transform: none;
+    right: 66px; /* rail: right 8px + 44px button + 2×4px padding, + 6px gap */
+    bottom: calc(150px + env(safe-area-inset-bottom));
+    width: min(250px, calc(100vw - 82px));
+  }
+
+  #toast {
+    bottom: calc(170px + env(safe-area-inset-bottom));
+  }
+}
+
+/* Date-navigation sheet: a modal calendar + time + quick-jump chips, opened
+   from the 📅 button. Replaces the old inline date/time/Go row everywhere
+   (desktop and mobile alike) so there's one picker UI, and it's never hidden
+   for lack of space. */
+#datesheet-dialog {
+  max-width: min(23rem, 92vw);
+}
+
+#datesheet-hint {
+  margin: 0 0 0.75rem;
+  font-size: 0.8rem;
+  color: #5c636a;
+}
+
+#datesheet-quick {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+
+.datesheet-quick-btn {
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 6px;
+  background: #f1f3f5;
+  color: #1c1c1c;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.datesheet-quick-btn:hover {
+  background: #e2e6ea;
+}
+
+#datesheet-cal {
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+
+#datesheet-cal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+#datesheet-cal-header button {
+  font: inherit;
+  font-size: 1.1rem;
+  line-height: 1;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 6px;
+  background: #f1f3f5;
+  color: #1c1c1c;
+  cursor: pointer;
+}
+
+#datesheet-cal-header button:hover {
+  background: #e2e6ea;
+}
+
+#datesheet-cal-header button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+#datesheet-cal-month {
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+#datesheet-cal-weekdays,
+#datesheet-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+
+#datesheet-cal-weekdays {
+  margin-bottom: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #5c636a;
+  text-align: center;
+  text-transform: capitalize;
+}
+
+.datesheet-day {
+  font: inherit;
+  font-size: 0.85rem;
+  aspect-ratio: 1;
+  border: none;
+  border-radius: 6px;
+  background: #f8f9fa;
+  color: #1c1c1c;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.datesheet-day:hover:not(:disabled) {
+  background: #e2e6ea;
+}
+
+.datesheet-day:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.datesheet-day.today {
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+
+.datesheet-day.selected {
+  background: var(--accent);
+  color: #fff;
+}
+
+#datesheet-time-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 0.85rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #e2e6ea;
+}
+
+#datesheet-time-row label {
+  font-size: 0.85rem;
+  color: #1c1c1c;
+}
+
+#datesheet-time {
+  font: inherit;
+  padding: 4px 6px;
+  border: 1px solid #ced4da;
+  border-radius: 6px;
+  background: #fff;
+  color: #1c1c1c;
+}
+
+#datesheet-go {
+  margin-left: auto;
+  font: inherit;
+  font-weight: 600;
+  padding: 6px 14px;
+  border: none;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+
+#datesheet-go:hover {
+  filter: brightness(1.08);
+}

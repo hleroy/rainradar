@@ -1,0 +1,178 @@
+[project]
+name = "rainradar"
+version = "0.1.0"
+description = "Live precipitation radar for France via backend-proxied RainViewer tiles."
+readme = "README.md"
+license = "AGPL-3.0-or-later"
+license-files = [ "LICENSE" ]
+authors = [
+  { name = "Hervé Le Roy", email = "hleroy@hleroy.com" },
+]
+requires-python = "==3.14.*"
+classifiers = [
+  "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.14",
+]
+dependencies = [
+  "apscheduler==3.11.3",
+  "django==6.0.8",
+  "django-environ==0.14.0",
+  "django-redis==7.0.0",
+  "gunicorn==26.0.0",
+  # Météo-France ODIM HDF5 render pipeline: decode HDF5, vectorized
+  # reprojection, PNG encode. manylinux wheels only — no GDAL, no host build
+  # (all four ship cp314 manylinux wheels, verified by a build spike).
+  "h5py==3.16.0",
+  "hiredis==3.4.0",
+  "httpx==0.28.1",
+  "numpy==2.5.1",
+  "pillow==12.3.0",
+  "psycopg[c]==3.3.4",
+  "pyproj==3.7.2",
+  # Web Push sender for background storm alerts. Synchronous (requests-based);
+  # the evaluator wraps every send in asyncio.to_thread. Pulls py-vapid + cryptography.
+  "pywebpush==2.3.0",
+  "redis==8.1.0",
+  "uvicorn[standard]==0.52.1",
+  "uvicorn-worker==0.4.0",
+  # WebSocket client for the Blitzortung lightning ingester. httpx cannot
+  # do WebSockets, hence the dedicated dep.
+  "websockets==17.0.1",
+]
+
+[dependency-groups]
+dev = [
+  "coverage==7.15.3",
+  "pre-commit==4.6.1",
+  "pytest>=9.1.1,<10",
+  "pytest-asyncio>=0.24",
+  "pytest-django>=4.8",
+  "pytest-sugar>=1.0",
+  "respx>=0.21",
+  "ruff==0.16.1",
+]
+
+# ==== ruff ====
+[tool.ruff]
+line-length = 100
+extend-exclude = [
+  "*/migrations/*.py",
+  "staticfiles/*",
+]
+lint.select = [
+  "A",
+  "ASYNC",
+  "B",
+  "BLE",
+  "C4",
+  "C90",
+  "DJ",
+  "DTZ",
+  "E",
+  "EM",
+  "ERA",
+  "EXE",
+  "F",
+  "FA",
+  "FBT",
+  "FLY",
+  "G",
+  "I",
+  "ICN",
+  "INP",
+  "INT",
+  "ISC",
+  "N",
+  "PERF",
+  "PGH",
+  "PIE",
+  "PL",
+  "PT",
+  "PTH",
+  "PYI",
+  "Q",
+  "RET",
+  "RSE",
+  "RUF",
+  "S",
+  "SIM",
+  "SLF",
+  "SLOT",
+  "T10",
+  "T20",
+  "TC",
+  "TID",
+  "TRY",
+  "UP",
+  "W",
+  "YTT",
+]
+lint.ignore = [
+  "N818",   # exception names (FramesUnavailable) follow the spec, not the *Error suffix
+  "RUF012", # Mutable class attributes should be annotated with `typing.ClassVar`
+  "S101",   # Use of assert detected (pytest)
+  "SIM102", # sometimes it's better to nest
+]
+lint.per-file-ignores."radar/tests/*" = [
+  "EM101",   # raising string literals is fine in throwaway test helpers
+  "PLR2004", # magic values (status codes) are fine in assertions
+  "S105",    # "token"-named test constants are fake fixtures, not real secrets
+  "S106",    # "token" keyword args in test helpers carry fake fixtures
+  "S107",    # "token" default args in test helpers carry fake fixtures
+  "SLF001",  # tests reach into provider/cache internals on purpose
+  "TRY003",  # inline exception messages are fine in tiny test helpers/fakes
+  "TRY301",  # abstracting `raise` adds noise in tiny test helpers
+]
+lint.per-file-ignores."radar/tests/conftest.py" = [ "SLF001" ]
+# scripts/ is a directory of standalone, dev-only investigation tools — never
+# imported by the app and never shipped. They legitimately do things application
+# code should not: import heavy optional deps lazily, reach into render internals
+# to reuse them, carry a long argparse main(), and report any failure verbatim.
+# Declaring that once here beats scattering noqa across every tool (and the app's
+# own rules still apply in full to radar/ and config/).
+lint.per-file-ignores."scripts/*" = [
+  "ASYNC240", # pathlib writing output files from an async main() — nothing else to starve
+  "BLE001",   # an investigation tool reports whatever the upstream threw, verbatim
+  "C901",     # argparse-driven main() is long but linear, not complex
+  "E402",     # imports must follow django.setup() in a standalone script
+  "EM101",    # a CLI's error *is* its message; hoisting it to a variable adds noise
+  "EM102",    # as EM101, for the f-string form
+  "INP001",   # scripts/ is a plain directory of standalone tools, not a package
+  "PLC0415",  # h5py/PIL/pybufrkit imported lazily, as in the app
+  "PLR0911",  # a probe returns early on each thing it rules out
+  "PLR0912",  # branches here are CLI subcommands, not nested logic
+  "PLR0913",  # tuning knobs are CLI flags; there are a lot of them
+  "PLR0917",  # as PLR0913 — a probe's grid/tile coords arrive positionally
+  "PLR2004",  # magic thresholds are the subject of a comparison script
+  "S310",     # fetches our own known upstreams
+  "S314",     # parses our own favicon.svg
+  "SLF001",   # deliberate reuse of render internals — the point of a dev tool
+  "T201",     # these tools exist to print
+  "TRY003",   # see EM101 — same call sites
+]
+lint.isort.force-single-line = true
+
+# ==== pyproject-fmt ====
+[tool.pyproject-fmt]
+keep_full_version = true
+
+[tool.pytest]
+ini_options.minversion = "8.0"
+ini_options.python_files = [
+  "test_*.py",
+  "tests.py",
+]
+# ==== pytest ====
+ini_options.addopts = [
+  "--ds=config.settings.test",
+  "--reuse-db",
+  "--import-mode=importlib",
+]
+ini_options.asyncio_mode = "auto"
+
+[tool.coverage]
+run.omit = [ "*/migrations/*", "*/tests/*" ]
+# ==== Coverage ====
+run.source = [ "radar" ]
+report.show_missing = true

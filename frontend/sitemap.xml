@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Rain Radar sitemap. Hand-written and static: the site has exactly three
+  documents, and every other URL is data (tiles, JSON API, SSE) that robots.txt
+  disallows outright. A generated sitemap would add a moving part for no gain.
+
+  Only the explainer pair carries hreflang — it is the one place two real URLs
+  hold the same content in two languages. The app itself lives at a single URL
+  and switches language client-side, so it is listed on its own, exactly as its
+  self-referencing canonical says.
+
+  lastmod is deliberately fixed rather than deploy-stamped: churning it on every
+  release trains crawlers to distrust it.
+-->
+<urlset
+  xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+  xmlns:xhtml="http://www.w3.org/1999/xhtml"
+>
+  <url>
+    <loc>https://rainradar.hleroy.com/</loc>
+    <lastmod>2026-08-13</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>1.0</priority>
+  </url>
+  <url>
+    <loc>https://rainradar.hleroy.com/apropos</loc>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://rainradar.hleroy.com/apropos" />
+    <xhtml:link rel="alternate" hreflang="en" href="https://rainradar.hleroy.com/about" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://rainradar.hleroy.com/apropos" />
+    <lastmod>2026-08-13</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://rainradar.hleroy.com/about</loc>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://rainradar.hleroy.com/apropos" />
+    <xhtml:link rel="alternate" hreflang="en" href="https://rainradar.hleroy.com/about" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://rainradar.hleroy.com/apropos" />
+    <lastmod>2026-08-13</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.8</priority>
+  </url>
+</urlset>

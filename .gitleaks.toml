@@ -1,0 +1,49 @@
+title = "Rain Radar — Gitleaks configuration"
+
+[extend]
+# Inherit all 150+ built-in gitleaks rules. We only add project-specific
+# allowlists below, not replace the ruleset, so any new upstream rules are
+# automatically included.
+useDefault = true
+
+[[allowlists]]
+  id = "django-settings-dev-defaults"
+  description = """
+    Django settings use the django-environ env() helper with a hardcoded
+    fallback for DJANGO_SECRET_KEY in the local and test environments only.
+    These fallbacks are intentional; production (config/settings/production.py)
+    reads DJANGO_SECRET_KEY with no default= argument.
+
+    ruff/black formats the call across multiple lines, so the high-entropy value
+    lands on its own `default="..."` line — the regex targets that line. A
+    double constraint (line regex AND path) means only this pattern in these two
+    files is exempt; any other secret-like value there is still flagged.
+  """
+  regexTarget = "line"
+  regexes = [
+    # Matches the formatter's own line:  default="<value>",
+    '''^\s*default=["'][^"']+["'],?\s*$''',
+  ]
+  paths = [
+    '''config/settings/local\.py''',
+    '''config/settings/test\.py''',
+  ]
+
+[[allowlists]]
+  id = "local-env-dev-credentials"
+  description = """
+    .envs/.local/* is committed on purpose (see .gitignore: .envs/* is ignored
+    except .envs/.local/) and carries throwaway development credentials for the
+    local docker compose stack. Production secrets live in .envs/.production/*,
+    which stays gitignored.
+
+    Scoped by both a line regex (only these known keys) and a path filter, so a
+    stray real secret pasted into these files is still caught.
+  """
+  regexTarget = "line"
+  regexes = [
+    '''^(DJANGO_SECRET_KEY|POSTGRES_USER|POSTGRES_PASSWORD)=''',
+  ]
+  paths = [
+    '''\.envs/\.local/.*''',
+  ]

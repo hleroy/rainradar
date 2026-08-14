@@ -1,0 +1,489 @@
+<!doctype html>
+<!-- lang is French because the served bytes are what crawlers and scrapers index,
+     and the audience is France. i18n.js still rewrites documentElement.lang (and the
+     document title, from app.document_title) once the dictionary loads, so an
+     English visitor gets an English page — but the *default* is the majority case
+     rather than an accident. There is only one app URL, so no hreflang here: the
+     self-referencing canonical below is the complete signal. The FR↔EN alternate
+     pair lives on /apropos ↔ /about, where two real URLs exist. -->
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <!-- No maximum-scale: pinch-zoom must stay available (it is also a standing
+         Lighthouse accessibility failure, which is a ranking-adjacent signal). -->
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Radar de pluie et orages en direct — France | Rain Radar</title>
+    <meta
+      name="description"
+      content="Suivez la pluie et les orages en direct sur toute la France : animation radar des 2 dernières heures, foudre en temps réel, archive de 90 jours. Gratuit, sans pub ni pistage."
+    />
+    <link rel="canonical" href="https://rainradar.hleroy.com/" />
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+    <link rel="manifest" href="/static/manifest.webmanifest" />
+    <meta name="theme-color" content="#1c1c1c" />
+    <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon-180.png" />
+
+    <!-- Link previews (Open Graph + Twitter). og:image must be absolute — scrapers
+         fetch it out of band, with no document base to resolve against. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Rain Radar" />
+    <meta property="og:url" content="https://rainradar.hleroy.com/" />
+    <meta property="og:title" content="Radar de pluie et orages en direct — France" />
+    <meta
+      property="og:description"
+      content="La pluie et la foudre en direct sur toute la France, avec un rejeu des 2 dernières heures et une archive de 90 jours. Sans pub, sans pistage."
+    />
+    <meta property="og:locale" content="fr_FR" />
+    <meta property="og:locale:alternate" content="en_GB" />
+    <meta property="og:image" content="https://rainradar.hleroy.com/static/img/og-image.jpg" />
+    <meta property="og:image:type" content="image/jpeg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="Carte de France couverte par l'écho radar d'un épisode orageux."
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Radar de pluie et orages en direct — France" />
+    <meta
+      name="twitter:description"
+      content="La pluie et la foudre en direct sur toute la France, avec un rejeu des 2 dernières heures et une archive de 90 jours. Sans pub, sans pistage."
+    />
+    <meta name="twitter:image" content="https://rainradar.hleroy.com/static/img/og-image.jpg" />
+
+    <link rel="stylesheet" href="/static/vendor/leaflet.css" />
+    <link rel="stylesheet" href="/static/css/app.css" />
+
+    <!-- Structured data. An ld+json block is an HTML *data block*, not a script: the
+         HTML parser never prepares it for execution, so `script-src 'self'` does not
+         apply and no CSP exemption is needed. Keep it that way — if this ever has to
+         become executable, delete it rather than loosening the policy. -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "Rain Radar",
+        "url": "https://rainradar.hleroy.com/",
+        "description": "Radar de pluie et de foudre en direct sur la France, avec un rejeu des 2 dernières heures et une archive de 90 jours.",
+        "applicationCategory": "WeatherApplication",
+        "operatingSystem": "Any",
+        "browserRequirements": "Requires JavaScript.",
+        "inLanguage": ["fr", "en"],
+        "isAccessibleForFree": true,
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "EUR" },
+        "author": { "@type": "Person", "name": "Hervé Le Roy", "url": "https://hleroy.com" },
+        "license": "https://www.gnu.org/licenses/agpl-3.0.html"
+      }
+    </script>
+  </head>
+  <body>
+    <div id="map"></div>
+
+    <!-- Inline icon sprite: one stroke-based set drawn with
+         currentColor, replacing the emoji/unicode glyphs that rendered
+         differently on every OS. Hidden from CSS, never a style attribute:
+         production serves the shell under `style-src 'self'`, which covers
+         style-src-attr, so an inline style would be dropped and the raw
+         symbol container would take up space at the top of the page. -->
+    <svg xmlns="http://www.w3.org/2000/svg" class="icon-sprite" aria-hidden="true">
+      <symbol id="i-info" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 11v5" />
+          <circle cx="12" cy="7.6" r="0.4" fill="currentColor" />
+        </g>
+      </symbol>
+      <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5 18.5 12 8 18.5Z" fill="currentColor" /></symbol>
+      <symbol id="i-pause" viewBox="0 0 24 24"><path d="M8 6h2.6v12H8zM13.4 6H16v12h-2.6z" fill="currentColor" /></symbol>
+      <symbol id="i-prev" viewBox="0 0 24 24">
+        <path d="M14.5 6 8.5 12l6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+      </symbol>
+      <symbol id="i-next" viewBox="0 0 24 24">
+        <path d="M9.5 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+      </symbol>
+      <symbol id="i-cal" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+          <rect x="4" y="5" width="16" height="15" rx="2" />
+          <path d="M4 10h16M8 3v4M16 3v4" />
+        </g>
+      </symbol>
+      <symbol id="i-bolt" viewBox="0 0 24 24">
+        <path d="M13 2 5 13.2h5.6L9.4 22 19 9.8h-5.7L13 2Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" />
+      </symbol>
+      <symbol id="i-locate" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+          <circle cx="12" cy="12" r="6.2" />
+          <path d="M12 2.6v3M12 18.4v3M2.6 12h3M18.4 12h3" />
+          <circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none" />
+        </g>
+      </symbol>
+      <symbol id="i-bell" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 4a6 6 0 0 1 6 6v4l1.9 2.8H4.1L6 14v-4a6 6 0 0 1 6-6Z" />
+          <path d="M10.3 20a1.9 1.9 0 0 0 3.4 0" />
+        </g>
+      </symbol>
+      <symbol id="i-tune" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+          <path d="M4 8h8.2M18.2 8H20M4 16h2.2M12.2 16H20" />
+          <circle cx="15.2" cy="8" r="2.4" />
+          <circle cx="9.2" cy="16" r="2.4" />
+        </g>
+      </symbol>
+      <symbol id="i-clap" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M20.2 6 3 11l-.9-2.4c-.3-1.1.3-2.2 1.3-2.5l13.5-4c1.1-.3 2.2.3 2.5 1.3Z" />
+          <path d="m6.2 5.3 3.1 3.9" />
+          <path d="m12.4 3.4 3.1 4" />
+          <path d="M3 11h18v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+        </g>
+      </symbol>
+    </svg>
+
+    <header id="topbar">
+      <h1 id="app-title">
+        <button id="about-trigger" type="button" data-i18n-title="about.open" aria-haspopup="dialog">
+          <svg class="icon" aria-hidden="true"><use href="#i-info" /></svg>
+          <span data-i18n="app.title">Rain radar</span>
+        </button>
+      </h1>
+      <!-- Share/export is an app-level action, not a map-state toggle, so it
+           sits in the topbar chrome (next to About/language), not the tool rail. -->
+      <button id="clip-btn" type="button" data-i18n-title="clip.export" aria-label="Share as video">
+        <svg class="icon" aria-hidden="true"><use href="#i-clap" /></svg>
+      </button>
+      <button id="lang-toggle" type="button" title="FR/EN">
+        <span data-lang="fr">FR</span><span data-lang="en">EN</span>
+      </button>
+    </header>
+
+    <!-- Map tools (redesign): a vertical Leaflet-style rail on the right edge —
+         the layer/anchor state toggles (lightning, locate, alerts). -->
+    <div id="toolrail" role="group" aria-label="Map tools">
+      <button
+        id="lightning-btn"
+        type="button"
+        hidden
+        data-state="off"
+        aria-pressed="false"
+        data-i18n-title="control.lightning"
+        aria-label="Lightning"
+      >
+        <svg class="icon" aria-hidden="true"><use href="#i-bolt" /></svg>
+      </button>
+      <button
+        id="locate-btn"
+        type="button"
+        data-state="idle"
+        data-i18n-title="control.locate"
+        aria-label="Locate me"
+      >
+        <svg class="icon" aria-hidden="true"><use href="#i-locate" /></svg>
+      </button>
+      <button
+        id="alert-btn"
+        type="button"
+        hidden
+        data-state="off"
+        aria-pressed="false"
+        data-i18n-title="control.alerts"
+        aria-label="Storm alerts"
+      >
+        <svg class="icon" aria-hidden="true"><use href="#i-bell" /></svg>
+      </button>
+      <button
+        id="settings-btn"
+        type="button"
+        aria-expanded="false"
+        aria-controls="settings-panel"
+        data-i18n-title="settings.open"
+        aria-label="Display settings"
+      >
+        <svg class="icon" aria-hidden="true"><use href="#i-tune" /></svg>
+      </button>
+    </div>
+
+    <!-- Display settings: a compact NON-modal popover anchored beside the tool
+         rail's gear. Deliberately not a .modal-panel — the map must stay visible
+         so the opacity slider previews live. Both rows are persisted preferences;
+         the rings row is hidden without the backend lightning advert. -->
+    <div id="settings-panel" hidden role="group" data-i18n-title="settings.open" aria-label="Display settings">
+      <div class="settings-row">
+        <label for="setting-opacity" data-i18n="settings.opacity">Rain opacity</label>
+        <div class="settings-slider-row">
+          <input id="setting-opacity" type="range" min="20" max="100" step="5" value="80" />
+          <span id="setting-opacity-value" aria-hidden="true">80&nbsp;%</span>
+        </div>
+      </div>
+      <!-- Radar source: populated from the providers advert, shown only when
+           ≥2 sources are advertised. Provider labels are proper nouns, untranslated. -->
+      <div class="settings-row" id="setting-source-row" hidden>
+        <span class="settings-label" id="setting-source-label" data-i18n="settings.source">Radar source</span>
+        <div
+          class="settings-radios"
+          id="setting-source-radios"
+          role="radiogroup"
+          aria-labelledby="setting-source-label"
+        ></div>
+      </div>
+      <div class="settings-row" id="setting-rings-row" hidden>
+        <label class="settings-check">
+          <input id="setting-rings" type="checkbox" checked />
+          <span data-i18n="settings.rings">Show alert circles on the map</span>
+        </label>
+        <p class="settings-note" data-i18n="settings.rings_note">Alerts stay active either way.</p>
+      </div>
+    </div>
+
+    <!-- Transport bar (redesign): strictly time travel — LIVE, frame step/play,
+         time + date readout, calendar. Day-steppers live in the date sheet
+         (-1d/+1d chips); the zoom readout is gone (Leaflet's +/- conveys it). -->
+    <div id="controls">
+      <div id="controls-row">
+        <button
+          id="live-btn"
+          type="button"
+          data-mode="live"
+          aria-pressed="true"
+          data-i18n-title="control.live"
+          aria-label="Live"
+        >
+          <span data-i18n="control.live">LIVE</span>
+        </button>
+        <span class="ctl-sep" aria-hidden="true"></span>
+        <button id="prev-btn" type="button" data-i18n-title="control.prev" aria-label="Previous frame">
+          <svg class="icon" aria-hidden="true"><use href="#i-prev" /></svg>
+        </button>
+        <button id="play-btn" type="button" data-i18n-title="control.play" aria-label="Play">
+          <svg class="icon" aria-hidden="true"><use href="#i-play" /></svg>
+        </button>
+        <button id="next-btn" type="button" data-i18n-title="control.next" aria-label="Next frame">
+          <svg class="icon" aria-hidden="true"><use href="#i-next" /></svg>
+        </button>
+        <span class="ctl-sep" aria-hidden="true"></span>
+        <div id="time-block">
+          <span id="timestamp">--:--</span>
+          <span id="time-sub">
+            <span id="date-label" aria-live="polite"></span>
+            <span id="nodata" data-show="false" role="status" aria-live="polite" data-i18n="gap.nodata">No data</span>
+          </span>
+        </div>
+        <button id="datesheet-btn" type="button" data-i18n-title="datesheet.open" aria-label="Go to date">
+          <svg class="icon" aria-hidden="true"><use href="#i-cal" /></svg>
+        </button>
+      </div>
+
+      <div id="clip-progress" role="status" aria-live="polite" hidden></div>
+
+      <div id="scrubber-row">
+        <span id="scrub-start" class="scrub-lab" aria-hidden="true"></span>
+        <div id="scrubber-wrap">
+          <input id="scrubber" type="range" min="0" max="0" value="0" aria-label="Timeline" />
+          <div id="gap-overlay" aria-hidden="true"></div>
+          <div id="scrub-bubble" hidden aria-hidden="true"></div>
+        </div>
+        <span id="scrub-end" class="scrub-lab" aria-hidden="true"></span>
+      </div>
+    </div>
+
+    <div id="toast" data-show="false" role="status" aria-live="polite"></div>
+
+    <!-- Storm-alert placement mode: a fixed reticle the user pans the map
+         under, plus a slim non-modal hint bar. Both hidden unless placing. -->
+    <div id="alert-crosshair" hidden aria-hidden="true"></div>
+    <div id="alert-placebar" hidden role="group" aria-label="Place alert point">
+      <span id="alert-place-hint" data-i18n="alert.place.hint">Position the map on your alert point</span>
+      <button id="alert-confirm" type="button" data-i18n="alert.place.confirm">Confirm</button>
+      <button id="alert-cancel" type="button" data-i18n="alert.place.cancel">Cancel</button>
+    </div>
+
+    <div id="about-overlay" class="about-overlay" hidden>
+      <div
+        id="about-dialog"
+        class="modal-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="about-title"
+        tabindex="-1"
+      >
+        <button id="about-close" class="modal-close-btn" type="button" data-i18n-title="about.close" aria-label="Close">
+          ×
+        </button>
+        <!-- The app's own icon, not generic dialog chrome: the same cloud-bolt-drops
+             mark as the favicon and the installed PWA. -->
+        <header class="about-head">
+          <img class="about-mark" src="/static/favicon.svg" alt="" width="44" height="44" />
+          <div>
+            <h2 id="about-title" data-i18n="about.title">About</h2>
+            <p class="about-tagline" data-i18n="about.tagline">
+              Live rain and lightning across France
+            </p>
+          </div>
+        </header>
+        <div id="about-body"><!-- prose + credit built by about.js --></div>
+        <!-- The door to /apropos. It shows the destination instead of describing it:
+             a miniature of the same four layers, from the same frame, which spread
+             apart on hover — the page's whole idea performed in the gesture that
+             invites the click. Planes are empty spans (ignored by assistive tech);
+             the link's name comes from the sticker and the text block. It sits
+             above the readout: "how it works" answers the question the intro
+             raises, where the archive figures are a footnote to it. -->
+        <a id="about-explainer" href="/apropos">
+          <span class="mini-stack">
+            <span class="mini-plane" data-layer="carte"></span>
+            <span class="mini-plane" data-layer="halo"></span>
+            <span class="mini-plane" data-layer="pluie"></span>
+            <span class="mini-plane" data-layer="eclairs"></span>
+          </span>
+          <span class="about-explainer-text">
+            <strong data-i18n="about.explainer">How it works — the four layers</strong>
+            <small data-i18n="about.explainer.sub">The map, the rain and the lightning, taken apart</small>
+          </span>
+          <svg class="icon" aria-hidden="true" viewBox="0 0 24 24">
+            <path
+              d="M5 12h13m-5.5-6 6 6-6 6"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+          <span class="mini-sticker" data-i18n="about.explainer.sticker">Exploded view</span>
+        </a>
+        <!-- Readout: the only place the archive behind the map surfaces, so it is
+             styled as an instrument panel rather than another block of prose. -->
+        <section id="about-stats" aria-live="polite">
+          <h3 data-i18n="about.stats.heading">Statistics</h3>
+          <p id="about-live"><!-- live line built by about.js --></p>
+          <div id="about-figures"><!-- headline figures built by about.js --></div>
+          <dl id="about-stats-list"><!-- rows built by about.js --></dl>
+          <p id="about-stats-error" hidden data-i18n="about.stats.error">
+            Statistics are unavailable right now.
+          </p>
+        </section>
+      </div>
+    </div>
+
+    <div id="datesheet-overlay" class="about-overlay" hidden>
+      <div
+        id="datesheet-dialog"
+        class="modal-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="datesheet-title"
+        tabindex="-1"
+      >
+        <button
+          id="datesheet-close"
+          class="modal-close-btn"
+          type="button"
+          data-i18n-title="about.close"
+          aria-label="Close"
+        >
+          ×
+        </button>
+        <h2 id="datesheet-title" data-i18n="datesheet.title">Go to date</h2>
+        <p id="datesheet-hint" data-i18n="picker.utc_hint">Archive dates are in UTC</p>
+
+        <div id="datesheet-quick" role="group" aria-label="Quick jump">
+          <button type="button" class="datesheet-quick-btn" data-offset-days="-30" data-i18n="datesheet.quick.30d">
+            -30d
+          </button>
+          <button type="button" class="datesheet-quick-btn" data-offset-days="-7" data-i18n="datesheet.quick.7d">
+            -7d
+          </button>
+          <button type="button" class="datesheet-quick-btn" data-offset-days="-1" data-i18n="datesheet.quick.1d">
+            -1d
+          </button>
+          <button type="button" class="datesheet-quick-btn" data-offset-days="1" data-i18n="datesheet.quick.plus1d">
+            +1d
+          </button>
+        </div>
+
+        <fieldset id="datesheet-cal">
+          <legend class="visually-hidden" data-i18n="picker.date">Date</legend>
+          <div id="datesheet-cal-header">
+            <button
+              type="button"
+              id="datesheet-cal-prev"
+              data-i18n-title="datesheet.cal.prev_month"
+              aria-label="Previous month"
+            >
+              ‹
+            </button>
+            <span id="datesheet-cal-month" aria-live="polite"></span>
+            <button
+              type="button"
+              id="datesheet-cal-next"
+              data-i18n-title="datesheet.cal.next_month"
+              aria-label="Next month"
+            >
+              ›
+            </button>
+          </div>
+          <div id="datesheet-cal-weekdays"></div>
+          <div id="datesheet-cal-grid"></div>
+        </fieldset>
+
+        <div id="datesheet-time-row">
+          <label id="datesheet-time-label" for="datesheet-time" data-i18n="picker.time">Time</label>
+          <input id="datesheet-time" type="time" data-i18n-title="picker.time" aria-label="Time" />
+          <button id="datesheet-go" type="button" data-i18n="picker.jump">Go</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="alert-overlay" class="about-overlay" hidden>
+      <div
+        id="alert-dialog"
+        class="modal-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="alert-title"
+        tabindex="-1"
+      >
+        <button id="alert-close" class="modal-close-btn" type="button" data-i18n-title="about.close" aria-label="Close">
+          ×
+        </button>
+        <h2 id="alert-title" data-i18n="alert.sheet.title">Storm alerts</h2>
+        <p id="alert-explain" data-i18n="alert.sheet.explain">
+          Get notified when lightning strikes near a point you choose.
+        </p>
+        <p id="alert-status" hidden data-i18n="alert.sheet.status">
+          Alerts are active around the marked point.
+        </p>
+        <div id="alert-actions-idle" class="alert-actions">
+          <button id="alert-my-position" type="button" data-i18n="alert.sheet.my_position">
+            My position
+          </button>
+          <button id="alert-pick-map" type="button" data-i18n="alert.sheet.pick_map">
+            Pick on the map
+          </button>
+        </div>
+        <div id="alert-actions-armed" class="alert-actions" hidden>
+          <button id="alert-move" type="button" data-i18n="alert.sheet.move">Move the point</button>
+          <button id="alert-my-position-armed" type="button" data-i18n="alert.sheet.my_position">
+            My position
+          </button>
+          <button id="alert-disable" type="button" data-i18n="alert.sheet.disable">
+            Turn off alerts
+          </button>
+        </div>
+        <p id="alert-disclaimer" data-i18n="alert.sheet.disclaimer">
+          Informational only — not a safety warning.
+        </p>
+        <p id="alert-push-status" hidden></p>
+        <p id="alert-privacy" class="alert-fineprint" hidden data-i18n="alert.sheet.privacy">
+          While push alerts are on, your alert point (rounded to ~1 km) is stored on the server.
+        </p>
+        <p id="alert-ios-hint" class="alert-fineprint" hidden data-i18n="alert.sheet.ios_install">
+          On iPhone/iPad, install the app to get alerts when it's closed.
+        </p>
+      </div>
+    </div>
+
+    <script src="/static/vendor/leaflet.js"></script>
+    <script type="module" src="/static/js/main.js"></script>
+  </body>
+</html>

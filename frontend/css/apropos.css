@@ -1,0 +1,623 @@
+/* ─── Fontes ────────────────────────────────────────────────────────────
+     Sous-ensembles de DejaVu (licence Bitstream Vera / Arev, incorporation
+     autorisée), intégrés en data URI : la CSP bloque les CDN de polices.    */
+  @font-face {
+    font-family: "Plate Condensed";
+    src: url(/static/fonts/plate-condensed.woff2) format("woff2");
+    font-weight: 700;
+    font-display: swap;
+  }
+  @font-face {
+    font-family: "Plate Serif";
+    src: url(/static/fonts/plate-serif.woff2) format("woff2");
+    font-weight: 400;
+    font-display: swap;
+  }
+  @font-face {
+    font-family: "Plate Mono";
+    src: url(/static/fonts/plate-mono.woff2) format("woff2");
+    font-weight: 400;
+    font-display: swap;
+  }
+
+  /* Les quatre rendus, déclarés une seule fois et réutilisés par la maquette
+     et les fiches : un data URI répété doublerait le poids de la page. */
+  :root {
+    --img-base: url(/static/img/apropos-base.webp);
+    --img-reflectivity: url(/static/img/apropos-halo.png);
+    --img-rain: url(/static/img/apropos-rain.png);
+    --img-composite: url(/static/img/apropos-composite.png);
+  }
+
+  /* ─── Jetons ────────────────────────────────────────────────────────────
+     Le thème clair est la base ; le sombre redéfinit les mêmes jetons. Les
+     composants ne lisent que des jetons, jamais un hex brut.               */
+  :root {
+    --ground: #eef1f2;
+    --panel: #ffffff;
+    --sheet: #f4f2ec;
+    --ink: #131d26;
+    --muted: #5a6875;
+    --rule: #d8dee3;
+    --rule-soft: #e6eaed;
+    --spark: #00727f;
+    --shadow: 0 24px 60px -20px rgb(19 29 38 / 0.3);
+    --veil: 0;
+    color-scheme: light;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground: #080d12;
+      --panel: #0f171f;
+      --sheet: #151f28;
+      --ink: #c9d5df;
+      --muted: #6c7e8e;
+      --rule: #1d2a35;
+      --rule-soft: #17222c;
+      --spark: #00e5ff;
+      --shadow: 0 30px 70px -18px rgb(0 0 0 / 0.75);
+      --veil: 0.34;
+      color-scheme: dark;
+    }
+  }
+
+  /* Pas de sélecteur de thème : la page suit `prefers-color-scheme`, un point
+     c'est tout. Des blocs `:root[data-theme="…"]` dupliquaient les deux
+     palettes pour un attribut que rien ne pose — retirés. Les rétablir
+     demande de poser `data-theme` sur <html> avant la première peinture,
+     sinon la page clignote. */
+
+  /* ─── Base ──────────────────────────────────────────────────────────── */
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "Plate Serif", Georgia, serif;
+    font-size: 17px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+
+  .wrap {
+    /* Wide enough for the four layer cards to sit on one row. */
+    max-width: 1560px;
+    margin-inline: auto;
+    padding-inline: clamp(20px, 4vw, 56px);
+  }
+
+  h1, h2, h3 {
+    font-family: "Plate Condensed", "Arial Narrow", sans-serif;
+    font-weight: 700;
+    text-wrap: balance;
+    margin: 0;
+    letter-spacing: -0.015em;
+  }
+
+  .mono, .eyebrow {
+    font-family: "Plate Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .eyebrow {
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  a { color: var(--spark); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+
+  :where(a, button, summary):focus-visible {
+    outline: 2px solid var(--spark);
+    outline-offset: 3px;
+    border-radius: 2px;
+  }
+
+  /* ─── Ouverture ─────────────────────────────────────────────────────────
+     La maquette est le sujet de la page : elle doit tenir tout entière dans
+     la première vue, sans défilement. Sur écran large, le texte et les
+     commandes passent donc en colonne de gauche et lui laissent toute la
+     droite — c'est la hauteur de la fenêtre, et non la longueur du texte,
+     qui règle l'ouverture.                                                */
+  .opening {
+    display: grid;
+    gap: clamp(18px, 2vw, 38px);
+    padding-block: clamp(28px, 4vw, 52px);
+  }
+  .opening-text { display: grid; gap: clamp(22px, 3vh, 40px); }
+
+  @media (min-width: 1000px) {
+    .opening {
+      grid-template-columns: minmax(320px, 33%) 1fr;
+      gap: clamp(28px, 3.2vw, 60px);
+      /* `align-items` centre les deux colonnes l'une par rapport à l'autre ;
+         `align-content: start` empêche la rangée de s'étirer sur toute la
+         hauteur, sans quoi le vide restant se partageait à parts égales
+         au-dessus et au-dessous — et rogner la marge ne servait à rien,
+         le centrage le rendait aussitôt. */
+      align-items: center;
+      align-content: start;
+      min-height: 100vh;
+      padding-block: clamp(28px, 3.8vh, 52px) clamp(28px, 4vh, 52px);
+    }
+  }
+
+  .hero .eyebrow { margin-bottom: 14px; }
+  .hero h1 {
+    font-size: clamp(30px, 3.4vw, 46px);
+    line-height: 0.95;
+    letter-spacing: -0.028em;
+    max-width: 19ch;
+  }
+  /* Les quatre noms sont un index, pas la suite de la phrase — inline, on
+     lisait « quatre couches carte, halo… ». Dans la fonte des étiquettes et
+     sur sa propre ligne, la liste annonce les mots mêmes qui sont posés sur
+     les plans de la maquette.                                             */
+  .hero h1 em {
+    display: block;
+    margin-top: 12px;
+    font-family: "Plate Mono", ui-monospace, monospace;
+    font-size: 0.42em;
+    font-style: normal;
+    font-weight: 400;
+    letter-spacing: 0.05em;
+    line-height: 1.4;
+    color: var(--muted);
+  }
+  .standfirst {
+    max-width: 60ch;
+    margin-top: 18px;
+    font-size: clamp(15.5px, 1.25vw, 17px);
+    color: var(--muted);
+  }
+  .standfirst strong { color: var(--ink); font-weight: 400; }
+
+  /* ─── La maquette ───────────────────────────────────────────────────── */
+
+  .scene {
+    position: relative;
+    perspective: 2200px;
+    perspective-origin: 50% 46%;
+    aspect-ratio: 1 / 0.92;
+    /* Bound by viewport *height*, not max-height: capping the height while the
+       width ran on would break the ratio and stretch every layer image. */
+    width: 100%;
+    /* 74vh de large ⇒ 68vh de haut : le reste absorbe les marges de
+       l'ouverture et le peu que la pile dépasse par le haut. */
+    max-width: min(100%, 74vh);
+    margin-inline: auto;
+    container-type: inline-size;
+    cursor: grab;
+    touch-action: pan-y;
+  }
+  .scene:active { cursor: grabbing; }
+
+  /* Feuilles carrées : la découpe source est carrée en projection Mercator, donc
+     un plan carré ne déforme ni la carte ni les couches. */
+  .stack {
+    position: absolute;
+    left: 50%;
+    bottom: 3%;
+    width: 66%;
+    aspect-ratio: 1;
+    transform-style: preserve-3d;
+    transform: translateX(-50%) rotateX(var(--tilt, 58deg)) rotateZ(var(--spin, -34deg));
+    transition: transform 1s cubic-bezier(0.22, 0.9, 0.28, 1);
+  }
+
+  .plane {
+    position: absolute;
+    inset: 0;
+    margin: 0;
+    transform-style: preserve-3d;
+    transform: translateZ(var(--z, 0px));
+    transition:
+      transform 0.95s cubic-bezier(0.22, 0.9, 0.28, 1),
+      opacity 0.5s ease;
+    will-change: transform;
+  }
+  .plane.is-hidden { opacity: 0; pointer-events: none; }
+  .plane.is-dimmed { opacity: 0.14; }
+
+  .sheet {
+    position: absolute;
+    inset: 0;
+    background: var(--sheet);
+    border: 1px solid var(--rule);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+  /* À plat, seule la carte garde sa feuille : les couches météo doivent laisser
+     voir au travers, sinon la « pile aplatie » masquerait la carte au lieu de
+     se poser dessus. */
+  .stack.is-flat .plane:not(.is-base) .sheet {
+    background: transparent;
+    border-color: transparent;
+    box-shadow: none;
+  }
+  /* Les étiquettes se superposeraient toutes au même endroit une fois à plat. */
+  .stack.is-flat .plane-tag { opacity: 0; }
+  .plane-tag { transition: opacity 0.4s ease; }
+
+  .sheet .layer-img,
+  .sheet canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+  .layer-img {
+    background-image: var(--img);
+    background-size: 100% 100%;
+    background-repeat: no-repeat;
+  }
+  /* Quelle couche chaque vignette montre. En attribut `data-`, pas en style
+     inline : la page est servie sous `style-src 'self'`, qui couvre aussi
+     style-src-attr — un `style="--img: …"` serait rejeté et la vignette
+     resterait vide. Même raison pour les pastilles ci-dessous. */
+  .layer-img[data-img="base"] { --img: var(--img-base); }
+  .layer-img[data-img="reflectivity"] { --img: var(--img-reflectivity); }
+  .layer-img[data-img="rain"] { --img: var(--img-rain); }
+  .layer-img[data-img="composite"] { --img: var(--img-composite); }
+  /* La carte OSM est dessinée pour du papier blanc : sur fond sombre il faut
+     la faire reculer pour que la météo reste l'élément le plus lumineux. */
+  .is-base .layer-img::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: #0a1017;
+    opacity: var(--veil);
+  }
+
+  /* Étiquette posée dans le plan lui-même : elle se déforme avec la feuille,
+     comme un lettrage imprimé sur une carte. */
+  .plane-tag {
+    position: absolute;
+    left: 14px;
+    bottom: 10px;
+    display: flex;
+    align-items: baseline;
+    gap: 9px;
+    font-family: "Plate Mono", monospace;
+    font-size: clamp(9px, 1.15cqw, 13px);
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--muted);
+    white-space: nowrap;
+    text-shadow: 0 1px 3px var(--ground);
+  }
+  .plane-tag b { color: var(--ink); font-weight: 400; letter-spacing: 0.09em; }
+  .swatch {
+    width: 9px; height: 9px; flex: none;
+    border: 1px solid var(--rule);
+    transform: translateY(1px);
+  }
+  /* La couleur de chaque pastille, prise sur la couche qu'elle désigne. */
+  .swatch[data-sw="base"] { background: #d9d2c3; }
+  .swatch[data-sw="reflectivity"] { background: #ded097; }
+  .swatch[data-sw="rain"] {
+    background: linear-gradient(90deg, #3dbde6, #ffbb00, #c20406);
+  }
+  .swatch[data-sw="composite"] {
+    background: linear-gradient(90deg, #ded097, #3dbde6, #c20406);
+  }
+  .swatch[data-sw="lightning"] { background: #00e5ff; }
+
+  /* ─── Commandes ─────────────────────────────────────────────────────── */
+  /* Narrow: a bar above the maquette. Wide: the left rail (see below). */
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px 30px;
+    align-items: center;
+    justify-content: space-between;
+    padding-block: 15px;
+    border-block: 1px solid var(--rule);
+  }
+  .ctl-label {
+    margin: 0 0 9px;
+    font-family: "Plate Mono", monospace;
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .controls .ctl-label { display: none; }
+
+  @media (min-width: 1000px) {
+    /* Plus de `sticky` : les commandes vivent désormais dans la même vue que
+       la maquette, il n'y a plus rien à suivre au défilement. */
+    .controls {
+      display: grid;
+      gap: 22px;
+      align-content: start;
+      justify-content: stretch;
+      padding-block: 0;
+      border-block: 0;
+    }
+    .controls .ctl-label { display: block; }
+    .controls .seg { flex-direction: column; }
+    .controls .seg button {
+      border-right: 0;
+      border-bottom: 1px solid var(--rule);
+      text-align: left;
+    }
+    .controls .seg button:last-child { border-bottom: 0; }
+    /* Deux par deux plutôt qu'en pile : quatre chips empilées coûtaient à la
+       colonne une hauteur que la maquette réclame. */
+    .controls .chips { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .controls .chip { justify-content: flex-start; }
+    .controls .hint {
+      border-top: 1px solid var(--rule);
+      padding-top: 16px;
+      line-height: 1.6;
+    }
+  }
+
+  .seg { display: flex; border: 1px solid var(--rule); }
+  .seg button {
+    font-family: "Plate Mono", monospace;
+    font-size: 11px;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    padding: 9px 17px;
+    background: none;
+    border: 0;
+    border-right: 1px solid var(--rule);
+    color: var(--muted);
+    cursor: pointer;
+    transition: color 0.2s, background 0.2s;
+  }
+  .seg button:last-child { border-right: 0; }
+  .seg button[aria-pressed="true"] { background: var(--ink); color: var(--ground); }
+  .seg button:hover:not([aria-pressed="true"]) { color: var(--ink); }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-family: "Plate Mono", monospace;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 8px 13px;
+    background: none;
+    border: 1px solid var(--rule);
+    color: var(--muted);
+    cursor: pointer;
+    transition: color 0.2s, border-color 0.2s;
+  }
+  .chip:hover, .chip:focus-visible { color: var(--ink); border-color: var(--muted); }
+  .chip .swatch { width: 8px; height: 8px; }
+
+  .hint { font-size: 12.5px; color: var(--muted); font-family: "Plate Mono", monospace; }
+
+  /* ─── Sections ──────────────────────────────────────────────────────── */
+  section { padding-block: clamp(56px, 8vw, 100px); }
+  .rule-top { border-top: 1px solid var(--rule); }
+  .section-head { display: grid; gap: 16px; max-width: 66ch; }
+  .section-head h2 {
+    font-size: clamp(28px, 4.2vw, 48px);
+    line-height: 1;
+    letter-spacing: -0.025em;
+  }
+  .section-head p { margin: 0; color: var(--muted); }
+
+  /* ─── Fiches ────────────────────────────────────────────────────────── */
+  .cards {
+    margin-top: 46px;
+    display: grid;
+    gap: 26px;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  }
+  /* Four abreast once there is room — the section is "les quatre couches",
+     so they should read as one row of four. */
+  @media (min-width: 1120px) {
+    .cards { grid-template-columns: repeat(4, 1fr); }
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--rule);
+    display: flex;
+    flex-direction: column;
+  }
+  .card-img {
+    position: relative;
+    aspect-ratio: 1;
+    background: var(--sheet);
+    border-bottom: 1px solid var(--rule);
+    overflow: hidden;
+  }
+  /* Chaque couche sauf la carte est montrée posée sur la vraie carte : c'est
+     ainsi que le lecteur la rencontrera. */
+  .card-img .layer-base {
+    position: absolute; inset: 0;
+    background-image: var(--img-base);
+    background-size: 100% 100%;
+    opacity: 0.5;
+  }
+  .card-img .layer-img, .card-img canvas {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    display: block;
+  }
+  /* Colonne flex qui occupe toute la hauteur restante de la fiche : c'est ce
+     qui permet au tableau de faits de descendre en pied de fiche. */
+  .card-body {
+    padding: 20px 22px 24px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 13px;
+  }
+  .card-body h3 {
+    font-size: 25px;
+    letter-spacing: -0.01em;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .card-body p { margin: 0; font-size: 15.5px; color: var(--muted); }
+  /* `margin-top: auto` absorbe la hauteur libre : les quatre tableaux se posent
+     donc sur la même ligne de pied, quelle que soit la longueur du texte. */
+  .card-facts {
+    margin: auto 0 0;
+    padding: 14px 0 0;
+    display: grid;
+    gap: 7px;
+    font-family: "Plate Mono", monospace;
+    font-size: 11.5px;
+    border-top: 1px solid var(--rule-soft);
+    list-style: none;
+  }
+  .card-facts li { display: flex; justify-content: space-between; gap: 14px; }
+  .card-facts span:first-child { color: var(--muted); letter-spacing: 0.09em; text-transform: uppercase; }
+  .card-facts span:last-child { text-align: right; }
+
+  /* ─── Échelle de pluie ──────────────────────────────────────────────── */
+  .legend { margin-top: 42px; max-width: 900px; }
+  .legend-bar {
+    height: 40px;
+    border: 1px solid var(--rule);
+    background: linear-gradient(
+      90deg,
+      #3dbde6 0%, #008cc4 14%, #005a8d 28%,
+      #c9ce1c 45%, #ffbb00 60%, #ff6200 75%, #c20406 90%, #ffaaff 100%
+    );
+  }
+  .legend-scale {
+    margin-top: 10px;
+    display: flex;
+    justify-content: space-between;
+    font-family: "Plate Mono", monospace;
+    font-size: 11.5px;
+    color: var(--muted);
+    letter-spacing: 0.06em;
+  }
+  .legend-notes {
+    margin-top: 26px;
+    display: grid;
+    gap: 22px;
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  }
+  .legend-notes p { margin: 0; font-size: 15px; color: var(--muted); }
+  .legend-notes b {
+    display: block;
+    font-family: "Plate Condensed", sans-serif;
+    font-size: 17px;
+    letter-spacing: 0;
+    color: var(--ink);
+    margin-bottom: 3px;
+  }
+
+  /* ─── Le réseau ─────────────────────────────────────────────────────── */
+  .network {
+    margin-top: 46px;
+    display: grid;
+    gap: clamp(28px, 3.2vw, 52px);
+    align-items: start;
+  }
+  @media (min-width: 900px) {
+    .network { grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); }
+  }
+
+  /* La carte est un document imprimé pour du papier blanc. Contrairement au
+     fond OSM de la maquette, on ne l'assombrit pas — ses étiquettes doivent
+     rester lisibles ; on la pose sur un passe-partout blanc, comme une planche
+     rapportée dans la page. */
+  .network-map { margin: 0; }
+  .network-map .mat {
+    background: #ffffff;
+    border: 1px solid var(--rule);
+    padding: clamp(10px, 1.4vw, 18px);
+  }
+  .network-map img { display: block; width: 100%; height: auto; }
+  .network-map figcaption {
+    margin-top: 11px;
+    font-family: "Plate Mono", monospace;
+    font-size: 11.5px;
+    line-height: 1.55;
+    color: var(--muted);
+  }
+
+  .chain { margin: 0; padding: 0; list-style: none; display: grid; gap: 24px; }
+  .chain li {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 4px 16px;
+    align-items: baseline;
+  }
+  .chain .step {
+    grid-row: span 2;
+    font-family: "Plate Mono", monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    color: var(--muted);
+    padding-top: 4px;
+  }
+  .chain h3 { font-size: 21px; letter-spacing: -0.005em; }
+  .chain p { margin: 0; max-width: 46ch; font-size: 15.5px; color: var(--muted); }
+  .chain b { color: var(--ink); font-weight: 400; }
+
+  .net-sources { margin-top: 30px; }
+
+  /* ─── Chute ─────────────────────────────────────────────────────────── */
+  .kicker {
+    border-top: 1px solid var(--rule);
+    padding-block: clamp(40px, 6vw, 72px);
+    text-align: center;
+  }
+  .kicker p {
+    margin: 0;
+    font-family: "Plate Condensed", sans-serif;
+    font-weight: 700;
+    font-size: clamp(24px, 3.6vw, 40px);
+    letter-spacing: -0.02em;
+    color: var(--ink);
+  }
+  .kicker span {
+    display: block;
+    margin-top: 12px;
+    font-family: "Plate Mono", monospace;
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  /* ─── Ours ──────────────────────────────────────────────────────────── */
+  footer { border-top: 1px solid var(--rule); padding-block: 40px 60px; }
+  .colophon { display: grid; gap: 26px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+  .colophon h4 {
+    margin: 0 0 8px;
+    font-family: "Plate Mono", monospace;
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 400;
+  }
+  .colophon p { margin: 0; font-size: 14px; color: var(--muted); }
+  .colophon p + p { margin-top: 7px; }
+  /* Flex, not an inline icon: baseline-aligning an SVG against text needs a magic
+     offset per font size. `align-items: center` on a one-line row is exact. */
+  .colophon .source a { display: inline-flex; align-items: center; gap: 7px; }
+  .gh-mark { flex: none; }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+  }
+
+  @media (max-width: 620px) {
+    .scene { aspect-ratio: 1 / 1.02; }
+    /* Des feuilles un peu plus petites laissent la place que l'écartement des
+       plans réclame en hauteur (voir `zScale` côté script). */
+    .stack { width: 70%; }
+  }

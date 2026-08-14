@@ -1,0 +1,110 @@
+volumes:
+  production_postgres_data: {}
+  production_postgres_data_backups: {}
+  production_django_static: {}
+  production_radar_tiles: {}
+
+# TLS/routing is handled by the EXISTING host Traefik (not declared here).
+# `nginx` joins the external network `net`; internal services stay on the
+# default project network.
+networks:
+  net:
+    external: true
+
+services:
+  django:
+    build:
+      context: .
+      dockerfile: ./compose/production/django/Dockerfile
+    image: rainradar_production_django
+    volumes:
+      - production_django_static:/app/staticfiles
+      # Tile archive (rw): fallback view fetches+persists not-yet-archived tiles.
+      - production_radar_tiles:/data
+    depends_on:
+      - postgres
+      - redis
+    env_file:
+      - ./.envs/.production/.django
+      - ./.envs/.production/.postgres
+    environment:
+      # Per-container role flag, pinned in compose rather than the shared env
+      # file so both roles are visible side by side: the web container NEVER
+      # starts a scheduler (§5.4); only `archiver` below sets this true.
+      - ARCHIVER_ENABLED=false
+      # Dual-role flag: on the web container it drives the `lightning.enabled`
+      # advert in /api/radar/frames, which is what makes the frontend show the
+      # layer toggle and the storm-alerts UI. Pinned here (not in the generated
+      # .envs/.production/.django) so provisioning a fresh host can't silently
+      # drop it; the archiver sets it separately for ingest.
+      - LIGHTNING_ENABLED=true
+    command: /start
+    restart: unless-stopped
+
+  archiver:
+    # Reuse the django image; run as a separate single-replica container on the
+    # default internal network only (no Traefik labels, never public). This is
+    # the ONLY place APScheduler runs. NEVER scale beyond 1 replica —
+    # duplicate schedulers cause duplicate fetches.
+    image: rainradar_production_django
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - production_radar_tiles:/data
+    env_file:
+      - ./.envs/.production/.django
+      - ./.envs/.production/.postgres
+    environment:
+      - ARCHIVER_ENABLED=true
+      # Single WS lightning consumer. NEVER scale this service. The web
+      # container advertises + serves SSE/history only when LIGHTNING_ENABLED is
+      # also set in .envs/.production/.django (see README).
+      - LIGHTNING_ENABLED=true
+    command: /start-archiver
+    restart: unless-stopped
+
+  postgres:
+    build:
+      context: .
+      dockerfile: ./compose/production/postgres/Dockerfile
+    image: rainradar_production_postgres
+    volumes:
+      - production_postgres_data:/var/lib/postgresql/data
+      - production_postgres_data_backups:/backups
+    env_file:
+      - ./.envs/.production/.postgres
+    restart: unless-stopped
+
+  redis:
+    image: docker.io/redis:8.10
+    # No persistence (RDB/AOF off): Redis holds only reconstructible cache state
+    # — frames JSON, the archived set, the range cache, and gauges.
+    command: redis-server --save "" --appendonly no
+    restart: unless-stopped
+
+  nginx:
+    build:
+      context: .
+      dockerfile: ./compose/production/nginx/Dockerfile
+    image: rainradar_production_nginx
+    depends_on:
+      - django
+    restart: unless-stopped
+    volumes:
+      - production_django_static:/usr/share/nginx/html:ro
+      # Tile archive (ro): Nginx serves /tiles statically from here.
+      - production_radar_tiles:/data:ro
+    networks:
+      - default
+      - net
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=net
+      - traefik.http.routers.rainradar.rule=Host(`rainradar.hleroy.com`)
+      - traefik.http.routers.rainradar.entrypoints=websecure
+      - traefik.http.routers.rainradar.tls=true
+      # `letsencrypt` must match the ACME resolver configured on the host
+      # Traefik (the ACME email hleroy@hleroy.com lives there).
+      - traefik.http.routers.rainradar.tls.certresolver=letsencrypt
+      - traefik.http.services.rainradar.loadbalancer.server.port=80

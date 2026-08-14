@@ -1,0 +1,83 @@
+volumes:
+  rainradar_local_postgres_data: {}
+  rainradar_local_postgres_data_backups: {}
+  rainradar_local_radar_tiles: {}
+
+services:
+  django:
+    build:
+      context: .
+      dockerfile: ./compose/local/django/Dockerfile
+    image: rainradar_local_django
+    container_name: rainradar_local_django
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - /app/.venv
+      - .:/app:z
+      # Tile archive (rw): fallback view writes not-yet-archived tiles + dev
+      # serves /tiles from here (no Nginx in dev).
+      - rainradar_local_radar_tiles:/data
+    env_file:
+      - ./.envs/.local/.django
+      - ./.envs/.local/.postgres
+    environment:
+      # Per-container role flag, pinned in compose rather than the shared env
+      # file so both roles are visible side by side: the web container NEVER
+      # starts a scheduler (§5.4); only `archiver` below sets this true.
+      - ARCHIVER_ENABLED=false
+      # LIGHTNING_ENABLED=True so the web container advertises + serves the
+      # lightning layer in dev (the archiver also sets it for ingest).
+      - LIGHTNING_ENABLED=true
+    ports:
+      - '8000:8000'
+    command: /start
+
+  archiver:
+    # Same image as django, run as a separate single-replica container. This is
+    # the ONLY place APScheduler runs (poll + retention); ARCHIVER_ENABLED is set
+    # True here and nowhere else. NEVER scale this service beyond 1 —
+    # duplicate schedulers cause duplicate fetches.
+    build:
+      context: .
+      dockerfile: ./compose/local/django/Dockerfile
+    image: rainradar_local_django
+    container_name: rainradar_local_archiver
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - /app/.venv
+      - .:/app:z
+      - rainradar_local_radar_tiles:/data
+    env_file:
+      - ./.envs/.local/.django
+      - ./.envs/.local/.postgres
+    environment:
+      - ARCHIVER_ENABLED=true
+      # The single WS lightning consumer lives here, gated alongside the archiver
+      #. NEVER scale this service — duplicate WS connections ⇒ duplicate
+      # strikes. The web container advertises/serves the layer per LIGHTNING_ENABLED
+      # in the shared .django env (default off in dev; flip it there to show the UI).
+      - LIGHTNING_ENABLED=true
+    command: /start-archiver
+
+  postgres:
+    build:
+      context: .
+      dockerfile: ./compose/production/postgres/Dockerfile
+    image: rainradar_production_postgres
+    container_name: rainradar_local_postgres
+    volumes:
+      - rainradar_local_postgres_data:/var/lib/postgresql/data
+      - rainradar_local_postgres_data_backups:/backups
+    env_file:
+      - ./.envs/.local/.postgres
+
+  redis:
+    image: docker.io/redis:8.10
+    container_name: rainradar_local_redis
+    # No persistence (RDB/AOF off): Redis holds only reconstructible cache state
+    # — frames JSON, the archived set, the range cache, and gauges.
+    command: redis-server --save "" --appendonly no

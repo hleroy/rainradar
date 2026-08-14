@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>La météo, en quatre couches — Rain Radar</title>
+<meta name="description" content="Les quatre couches empilées de Rain Radar — carte, halo, pluie, éclairs — et d’où viennent les images du réseau de radars de Météo-France.">
+<link rel="icon" href="/static/favicon.svg">
+<link rel="canonical" href="https://rainradar.hleroy.com/apropos">
+<!-- Alternates must be absolute and must include this page itself: a group where
+     each member does not list every member (self included) is discarded wholesale.
+     x-default points at the French page — this is a French-audience site. Keep this
+     block byte-symmetric with about.html; a test asserts it. -->
+<link rel="alternate" hreflang="fr" href="https://rainradar.hleroy.com/apropos">
+<link rel="alternate" hreflang="en" href="https://rainradar.hleroy.com/about">
+<link rel="alternate" hreflang="x-default" href="https://rainradar.hleroy.com/apropos">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Rain Radar">
+<meta property="og:url" content="https://rainradar.hleroy.com/apropos">
+<meta property="og:title" content="La météo, en quatre couches — Rain Radar">
+<meta property="og:description" content="Carte, halo, pluie, éclairs : les quatre couches empilées de Rain Radar, prises une par une sur un vrai soir d’orage.">
+<meta property="og:locale" content="fr_FR">
+<meta property="og:locale:alternate" content="en_GB">
+<!-- Same card as the app: it *is* those four layers composited, which is precisely
+     what this page takes apart. A second asset would show the same picture. -->
+<meta property="og:image" content="https://rainradar.hleroy.com/static/img/og-image.jpg">
+<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Carte de France couverte par l’écho radar d’un épisode orageux.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="La météo, en quatre couches — Rain Radar">
+<meta name="twitter:description" content="Carte, halo, pluie, éclairs : les quatre couches empilées de Rain Radar, prises une par une sur un vrai soir d’orage.">
+<meta name="twitter:image" content="https://rainradar.hleroy.com/static/img/og-image.jpg">
+<link rel="stylesheet" href="/static/css/apropos.css">
+<script src="/static/js/apropos.js" defer></script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Article",
+  "headline": "La météo, en quatre couches",
+  "description": "Les quatre couches empilées de Rain Radar — carte, halo, pluie, éclairs — et d’où viennent les images du réseau de radars de Météo-France.",
+  "url": "https://rainradar.hleroy.com/apropos",
+  "inLanguage": "fr",
+  "image": "https://rainradar.hleroy.com/static/img/og-image.jpg",
+  "author": { "@type": "Person", "name": "Hervé Le Roy", "url": "https://hleroy.com" },
+  "isPartOf": { "@type": "WebSite", "name": "Rain Radar", "url": "https://rainradar.hleroy.com/" }
+}
+</script>
+</head>
+<body>
+<main>
+  <div class="wrap opening">
+    <div class="opening-text">
+    <div class="hero">
+      <p class="eyebrow">Vue éclatée</p>
+      <h1>La météo, en quatre couches <em>carte, halo, pluie, éclairs</em></h1>
+      <p class="standfirst">
+        Quand vous ouvrez Rain Radar avant de prendre le vélo ou pendant une randonnée,
+        vous regardez quatre choses dessinées les unes sur les autres. On les sépare ici,
+        une par une, pour voir ce que chacune raconte. <strong>Tout est réel</strong>&#8239;:
+        un vrai soir d&rsquo;orage sur la France, pris directement dans l&rsquo;application.
+      </p>
+    </div>
+
+      <div class="controls">
+        <div>
+          <p class="ctl-label">Vue</p>
+          <div class="seg" role="group" aria-label="Affichage des couches">
+            <button type="button" data-view="exploded" aria-pressed="true">Séparées</button>
+            <button type="button" data-view="flattened" aria-pressed="false">Comme à l&rsquo;écran</button>
+          </div>
+        </div>
+        <div>
+          <p class="ctl-label">Couches</p>
+          <div class="chips">
+          <button type="button" class="chip" data-solo="base">
+            <span class="swatch" data-sw="base"></span>Carte
+          </button>
+          <button type="button" class="chip" data-solo="reflectivity">
+            <span class="swatch" data-sw="reflectivity"></span>Halo
+          </button>
+          <button type="button" class="chip" data-solo="rain">
+            <span class="swatch" data-sw="rain"></span>Pluie
+          </button>
+          <button type="button" class="chip" data-solo="lightning">
+            <span class="swatch" data-sw="lightning"></span>Éclairs
+          </button>
+          </div>
+        </div>
+        <p class="hint">Survolez un nom pour isoler sa couche. Faites glisser la maquette pour la tourner et l&rsquo;incliner.</p>
+      </div>
+    </div>
+
+    <div class="scene">
+        <div class="stack" id="stack">
+          <figure class="plane is-base" data-layer="base">
+            <div class="sheet">
+              <div class="layer-img" data-img="base" role="img"
+                   aria-label="Carte de France : villes, routes et littoral."></div>
+            </div>
+            <figcaption class="plane-tag">
+              <span class="swatch" data-sw="base"></span>
+              <b>La carte</b> <span>où vous êtes</span>
+            </figcaption>
+          </figure>
+
+          <figure class="plane" data-layer="reflectivity">
+            <div class="sheet">
+              <div class="layer-img" data-img="reflectivity" role="img"
+                   aria-label="Un voile pâle et doux montrant l'air humide autour des cellules de pluie."></div>
+            </div>
+            <figcaption class="plane-tag">
+              <span class="swatch" data-sw="reflectivity"></span>
+              <b>Le halo</b> <span>l&rsquo;air humide</span>
+            </figcaption>
+          </figure>
+
+          <figure class="plane" data-layer="rain">
+            <div class="sheet">
+              <div class="layer-img" data-img="rain" role="img"
+                   aria-label="Taches bleues, jaunes et rouges montrant où la pluie tombe."></div>
+            </div>
+            <figcaption class="plane-tag">
+              <span class="swatch" data-sw="rain"></span>
+              <b>La pluie</b> <span>en train de tomber</span>
+            </figcaption>
+          </figure>
+
+          <figure class="plane" data-layer="composite">
+            <div class="sheet">
+              <div class="layer-img" data-img="composite" role="img"
+                   aria-label="La pluie et le halo réunis, tels qu'ils apparaissent dans l'application."></div>
+            </div>
+            <figcaption class="plane-tag">
+              <span class="swatch" data-sw="composite"></span>
+              <b>La météo</b> <span>pluie et halo</span>
+            </figcaption>
+          </figure>
+
+          <figure class="plane" data-layer="lightning">
+            <div class="sheet">
+              <canvas id="bolts" role="img"
+                      aria-label="Croix cyan marquant chaque impact de foudre."></canvas>
+            </div>
+            <figcaption class="plane-tag">
+              <span class="swatch" data-sw="lightning"></span>
+              <b>Les éclairs</b> <span>coup par coup</span>
+            </figcaption>
+          </figure>
+        </div>
+      </div>
+  </div>
+
+  <div class="wrap">
+    <section class="rule-top">
+      <div class="section-head">
+        <p class="eyebrow">Les quatre couches</p>
+        <h2>Ce que chacune vous raconte</h2>
+        <p>
+          Elles répondent à des questions différentes. Où suis-je&#8239;? Quelle est la
+          taille réelle de la cellule de pluie&#8239;? Est-ce qu&rsquo;il pleut sur moi en
+          ce moment, et à quelle force&#8239;? Et vaut-il mieux ne pas se trouver dehors
+          dans les minutes qui viennent&#8239;?
+        </p>
+      </div>
+
+      <div class="cards">
+        <article class="card">
+          <div class="card-img">
+            <div class="layer-img" data-img="base" role="img"
+                 aria-label="La couche carte seule : villes, routes et littoral."></div>
+          </div>
+          <div class="card-body">
+            <h3><span class="swatch" data-sw="base"></span>La carte</h3>
+            <p>
+              Les villes, les routes et le littoral, pour retrouver votre rue sous la
+              météo. Elle reste dessous, immobile&#8239;: c&rsquo;est la météo qui glisse
+              au-dessus quand vous faites défiler le temps.
+            </p>
+            <ul class="card-facts">
+              <li><span>Vient de</span><span>OpenStreetMap</span></li>
+              <li><span>Couvre</span><span>France et Corse</span></li>
+              <li><span>Mise à jour</span><span>en continu</span></li>
+            </ul>
+          </div>
+        </article>
+
+        <article class="card">
+          <div class="card-img">
+            <div class="layer-base"></div>
+            <div class="layer-img" data-img="reflectivity" role="img"
+                 aria-label="La couche halo posée sur la carte : masses pâles et diffuses."></div>
+          </div>
+          <div class="card-body">
+            <h3><span class="swatch" data-sw="reflectivity"></span>Le halo</h3>
+            <p>
+              Un voile doux autour de chaque cellule de pluie, qui suggère l&rsquo;air
+              humide que le radar perçoit avant que quoi que ce soit n&rsquo;atteigne le
+              sol. À prendre comme une idée de la taille réelle de la cellule et du sens
+              où son bord s&rsquo;étend&#8239;: pas comme une mesure sur laquelle se fier.
+            </p>
+            <ul class="card-facts">
+              <li><span>Montre</span><span>l&rsquo;étendue de la cellule</span></li>
+              <li><span>Actualisé</span><span>toutes les 5 min</span></li>
+              <li><span>À lire comme</span><span>une impression</span></li>
+            </ul>
+          </div>
+        </article>
+
+        <article class="card">
+          <div class="card-img">
+            <div class="layer-base"></div>
+            <div class="layer-img" data-img="rain" role="img"
+                 aria-label="La couche pluie posée sur la carte : noyaux bleus, jaunes et rouges."></div>
+          </div>
+          <div class="card-body">
+            <h3><span class="swatch" data-sw="rain"></span>La pluie</h3>
+            <p>
+              Celle qui compte&#8239;: où la pluie tombe vraiment, et à quelle force. Le
+              bleu est léger, le jaune et l&rsquo;orange vous trempent vite, le rouge est
+              une averse violente. C&rsquo;est elle que vous parcourez avec le curseur du
+              temps, et celle que les alertes surveillent.
+            </p>
+            <ul class="card-facts">
+              <li><span>Montre</span><span>la pluie, maintenant</span></li>
+              <li><span>Actualisée</span><span>toutes les 5 min</span></li>
+              <li><span>Archivée</span><span>90 jours</span></li>
+            </ul>
+          </div>
+        </article>
+
+        <article class="card">
+          <div class="card-img">
+            <div class="layer-base"></div>
+            <canvas id="bolts-card" role="img"
+                    aria-label="La couche éclairs posée sur la carte : croix cyan."></canvas>
+          </div>
+          <div class="card-body">
+            <h3><span class="swatch" data-sw="lightning"></span>Les éclairs</h3>
+            <p>
+              Chaque croix cyan est un vrai impact. Ils sont repérés par un réseau mondial
+              de bénévoles qui font tourner de petits récepteurs radio chez eux, et
+              arrivent dans l&rsquo;application quelques secondes après l&rsquo;éclair.
+              Chaque image ne montre que les impacts de ses propres minutes.
+            </p>
+            <ul class="card-facts">
+              <li><span>Montre</span><span>où ça a frappé</span></li>
+              <li><span>Arrive en</span><span>quelques secondes</span></li>
+              <li><span>Sur cette image</span><span data-strike-count>—</span></li>
+            </ul>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="rule-top">
+      <div class="section-head">
+        <p class="eyebrow">Lire les couleurs</p>
+        <h2>Il pleut fort, ou pas&#8239;?</h2>
+        <p>
+          La couche de pluie est colorée selon la quantité d&rsquo;eau qui tombe, en
+          millimètres par heure. Pas besoin de retenir les chiffres&#8239;: le passage du
+          bleu au jaune, c&rsquo;est le moment où «&#8239;un peu humide&#8239;» devient
+          «&#8239;on se met à l&rsquo;abri&#8239;».
+        </p>
+      </div>
+
+      <div class="legend">
+        <div class="legend-bar" role="img"
+             aria-label="Échelle de couleurs allant du bleu clair pour la bruine au rouge pour une averse violente, en passant par le jaune et l'orange."></div>
+        <div class="legend-scale" aria-hidden="true">
+          <span>0,5</span><span>1</span><span>2,5</span><span>5</span>
+          <span>10</span><span>20</span><span>50</span><span>100 mm/h</span>
+        </div>
+
+        <div class="legend-notes">
+          <p><b>Bleu</b>Bruine à pluie régulière. Une veste suffit.</p>
+          <p><b>Jaune</b>Assez fort pour vous tremper en quelques minutes.</p>
+          <p><b>Orange</b>Une vraie averse. Les flaques se forment vite.</p>
+          <p><b>Rouge et rose</b>Un déluge, souvent avec les éclairs qui vont avec.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="rule-top">
+      <div class="section-head">
+        <p class="eyebrow">D&rsquo;où viennent les images</p>
+        <h2>Trente-neuf radars, une image toutes les cinq&nbsp;minutes</h2>
+        <p>
+          La couche de pluie ne sort pas de nulle part, et Rain Radar ne la fabrique
+          pas. Elle vient du réseau de radars de Météo-France&#8239;— trente-neuf en
+          tout&#8239;— dont les antennes tournent jour et nuit. Le
+          rafraîchissement toutes les cinq minutes de l&rsquo;application n&rsquo;est
+          pas un choix de notre part&#8239;— c&rsquo;est le rythme du réseau.
+        </p>
+      </div>
+
+      <div class="network">
+        <figure class="network-map">
+          <div class="mat">
+            <img src="/static/img/apropos-radars.webp"
+                 alt="Carte de France semée de sites de radars nommés — Trappes, Bourges, Toulouse, Nancy… — chacun au centre d'un disque figurant la zone qu'il observe. Les disques se recouvrent et couvrent tout le territoire, Corse comprise. Quelques sites, en bleu clair, sont signalés comme radars partenaires : Jersey, La Dole, Nice, le Mont Vial.">
+          </div>
+          <figcaption>
+            Le réseau métropolitain, radars partenaires compris. Carte&#8239;:
+            <a href="https://meteofrance.com/meteo-a-z/les-systemes-dobservation-de-meteo-france">Météo-France</a>.
+          </figcaption>
+        </figure>
+
+        <ol class="chain">
+          <li>
+            <span class="step">01</span>
+            <h3>Le radar tourne</h3>
+            <p>
+              Chaque antenne fait le tour de l&rsquo;horizon et découpe le ciel autour
+              d&rsquo;elle en <b>720 tranches</b> d&rsquo;un demi-degré. Un radar seul ne
+              voit que sa région&#8239;: sur la carte, c&rsquo;est un disque&#8239;— pas la
+              France.
+            </p>
+          </li>
+          <li>
+            <span class="step">02</span>
+            <h3>Les vues sont recousues</h3>
+            <p>
+              Les disques se recouvrent, et quelques <b>radars partenaires</b> — Jersey,
+              La Dole, Nice, le Mont Vial — bouchent les trous près des frontières.
+              Météo-France assemble le tout en une seule image de la France
+              entière&#8239;— une <b>mosaïque</b>. C&rsquo;est cette image-là, et non une
+              image par radar, que reçoit l&rsquo;application.
+            </p>
+          </li>
+          <li>
+            <span class="step">03</span>
+            <h3>On compte l&rsquo;eau tombée</h3>
+            <p>
+              La mosaïque ne donne pas une vitesse mais une quantité&#8239;: l&rsquo;eau
+              tombée pendant ces cinq minutes, comptée <b>au centième de millimètre</b>.
+              Chaque point du territoire reçoit son chiffre.
+            </p>
+          </li>
+          <li>
+            <span class="step">04</span>
+            <h3>Rain Radar colorie</h3>
+            <p>
+              Nous multiplions par douze pour repasser en millimètres par heure&#8239;— la
+              grandeur de l&rsquo;échelle ci-dessus&#8239;— puis nous appliquons les
+              couleurs et découpons l&rsquo;image en tuiles. <b>Aucune couleur
+              n&rsquo;est inventée</b>&#8239;: chacune correspond à un chiffre mesuré.
+            </p>
+          </li>
+        </ol>
+      </div>
+
+      <p class="hint net-sources">
+        Sources&#8239;:
+        <a href="https://meteofrance.com/meteo-a-z/les-systemes-dobservation-de-meteo-france">Météo-France,
+        «&#8239;Les systèmes d&rsquo;observation&#8239;»</a> ·
+        <a href="https://www.aeris-data.fr/projects/reseau-radars-de-meteo-france/">AERIS,
+        «&#8239;Réseau de radars de Météo-France&#8239;»</a>
+      </p>
+    </section>
+  </div>
+
+  <div class="wrap">
+    <div class="kicker">
+      <p>Maintenant, vous savez ce que vous regardez.</p>
+      <span>Quatre couches, une seule carte</span>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap colophon">
+    <div>
+      <h4>Données météo</h4>
+      <p>Données Météo-France — Licence Ouverte 2.0.</p>
+    </div>
+    <div>
+      <h4>Données foudre</h4>
+      <p>Contributeurs Blitzortung.org, selon les conditions communautaires non commerciales du réseau.</p>
+    </div>
+    <div>
+      <h4>Fond de carte</h4>
+      <p>© les contributeurs OpenStreetMap, ODbL.</p>
+    </div>
+    <div>
+      <h4>Cette page</h4>
+      <p data-provenance>—</p>
+      <p>Rain Radar est publié sous licence AGPL-3.0-or-later.</p>
+      <!-- L'AGPL est la raison d'être de ce lien : la licence oblige à proposer la
+           source, donc l'offre se place là où la licence se lit. Marque GitHub en
+           SVG à même le document — la CSP interdit les styles et scripts en ligne,
+           pas le balisage, et un fichier de plus pour 15 px n'en vaut pas la peine. -->
+      <p class="source">
+        <a href="https://github.com/hleroy/rainradar">
+          <svg class="gh-mark" aria-hidden="true" viewBox="0 0 16 16" width="15" height="15">
+            <path
+              fill="currentColor"
+              d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0 0 16 8c0-4.42-3.58-8-8-8Z"
+            />
+          </svg>
+          Code source sur GitHub
+        </a>
+      </p>
+      <p><a href="/">Retour à la carte</a></p>
+    </div>
+  </div>
+</footer>
+</body>
+</html>

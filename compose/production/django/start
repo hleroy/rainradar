@@ -1,0 +1,21 @@
+#!/bin/bash
+
+set -o errexit
+set -o pipefail
+set -o nounset
+
+
+# Apply migrations on web start (the single django service; the archiver waits
+# for these tables before scheduling). Required for radar_frame / archive_gap
+# and the rest of the archive schema to exist.
+python /app/manage.py migrate --noinput
+
+python /app/manage.py collectstatic --noinput
+
+# Multiple async workers: each uvicorn worker already multiplexes many
+# connections, so workers exist to spread CPU-bound work (JSON rendering, tile
+# fallback) across cores and to isolate a busy worker from the rest. Default 4
+# suits a shared multi-core host; tune with WEB_CONCURRENCY (no rebuild needed).
+# All state lives in Redis/Postgres/disk, so workers are interchangeable.
+exec gunicorn config.asgi --bind 0.0.0.0:5000 --chdir=/app -k uvicorn_worker.UvicornWorker \
+  --workers "${WEB_CONCURRENCY:-4}"

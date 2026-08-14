@@ -1,0 +1,18 @@
+# Rain Radar — https://rainradar.hleroy.com
+#
+# Served straight from frontend/ (collectstatic copies it to the Nginx document
+# root, like index.html and sw.js). Nginx needs an explicit `location = /robots.txt`
+# for this to be reachable at all — otherwise it falls into the SPA block.
+
+User-agent: *
+Allow: /
+
+# Data paths, not documents. The tile archive alone is 62 tiles x 288 frames/day
+# x 90 days of retained PNGs — pure crawl-budget waste with nothing to index.
+Disallow: /api/
+Disallow: /tiles/
+Disallow: /metrics
+Disallow: /healthz
+Disallow: /readyz
+
+Sitemap: https://rainradar.hleroy.com/sitemap.xml
