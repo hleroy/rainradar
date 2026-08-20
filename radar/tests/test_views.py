@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC
 from datetime import datetime
 
@@ -9,10 +10,12 @@ import httpx
 import pytest
 import respx
 from django.conf import settings
+from django.db.utils import OperationalError
 from django.test import override_settings
 
 from radar import cache
 from radar import storage
+from radar import views
 from radar.models import ArchiveGap
 from radar.models import RadarFrame
 from radar.providers import rainviewer
@@ -431,6 +434,122 @@ async def test_tile_aged_out_of_the_live_window_returns_cacheable_204(
     resp = await async_client.get("/tiles/1970-01-01/999/5/16/11.png")
     assert resp.status_code == 204
     assert resp["Cache-Control"] == "public, max-age=31536000, immutable"
+
+
+@respx.mock
+async def test_tile_archived_frame_answers_204_without_the_row(async_client, sample_weather_maps):
+    """A frame in the archived set settles a miss from Redis alone — no DB, no upstream.
+
+    `status='ok'` means every matrix tile was attempted and none errored, so each one is
+    either on disk or on the row's `empty` list; the archived set holds exactly the ok
+    frames. "In the set, not on disk" is therefore already "nothing to draw".
+
+    This is the whole of historical navigation. Without it, replaying an archived day
+    cost one Postgres connection per missing tile — Django's ASGI handler gives each
+    request its own thread and a connection is thread-local — which exhausted
+    max_connections and turned every tile into a 500.
+
+    Deliberately seeds *no* RadarFrame row: reaching the DB at all would 404 here, so a
+    204 proves the Redis tier short-circuited ahead of it.
+    """
+    frames_route = respx.get(settings.RAINVIEWER_API_URL).mock(
+        return_value=httpx.Response(200, json=sample_weather_maps),
+    )
+    tile_route = respx.get(TILE_URL).mock(return_value=httpx.Response(200, content=b"png"))
+    await cache.add_archived("rainviewer", TS)
+
+    resp = await async_client.get(TILE_PATH)
+    assert resp.status_code == 204
+    assert resp["Cache-Control"] == "public, max-age=31536000, immutable"
+    assert await RadarFrame.objects.acount() == 0  # the answer never needed a row
+    assert frames_route.call_count == 0
+    assert tile_route.call_count == 0
+
+
+@respx.mock
+async def test_tile_archived_set_miss_still_consults_the_row(async_client, sample_weather_maps):
+    """The Redis tier is a fast path, not a replacement: an unarchived frame uses the row.
+
+    Guards the degradation this design leans on — Redis carries no persistence, so after
+    a flush every tile must still be answered correctly from Postgres (bounded), just
+    more expensively, until the archiver's cold-start rebuild refills the set.
+    """
+    frames_route = respx.get(settings.RAINVIEWER_API_URL).mock(
+        return_value=httpx.Response(200, json=sample_weather_maps),
+    )
+    await RadarFrame.objects.acreate(
+        timestamp=TS,
+        provider="rainviewer",
+        tile_count=61,
+        status="ok",
+        missing=[],
+        empty=[{"z": 5, "x": 16, "y": 11}],
+    )
+    assert not await cache.is_archived("rainviewer", TS)  # flushed by the conftest
+
+    resp = await async_client.get(TILE_PATH)
+    assert resp.status_code == 204
+    assert resp["Cache-Control"] == "public, max-age=31536000, immutable"
+    assert frames_route.call_count == 0
+
+
+async def test_tile_archive_lookup_failure_sheds_503_uncached(async_client, monkeypatch):
+    """A DB error in the row lookup is a 503, never a 500 — and never a cached 204.
+
+    Direct regression test for the incident: `_archived_empty` was the only unguarded DB
+    call in any view, so connection-pool pressure surfaced as a wall of 500s instead of
+    graceful shedding.
+
+    The 204 half matters as much as the 500 half. We do not know whether the tile is
+    empty, and `_tile_no_content` is `immutable` — answering 204 here would pin a blank
+    tile in every visitor's browser cache for a year.
+    """
+
+    async def _boom(*_args, **_kwargs):
+        msg = "FATAL: sorry, too many clients already"
+        raise OperationalError(msg)
+
+    monkeypatch.setattr(views, "_archived_empty", _boom)
+    resp = await async_client.get(TILE_PATH)
+    assert resp.status_code == 503
+    assert resp["Cache-Control"] == "no-store"
+
+
+@override_settings(TILE_ARCHIVE_LOOKUP_CONCURRENCY=3)
+async def test_tile_archive_lookup_is_concurrency_bounded(async_client, monkeypatch):
+    """N concurrent tile misses must never mean N concurrent archive lookups.
+
+    Load-bearing. Django's ASGI handler runs each request inside its own
+    `ThreadSensitiveContext`, and a Django DB connection is thread-local, so an
+    unbounded fan-out of tile misses *is* an unbounded fan-out of Postgres connections —
+    and `/tiles/…` is deliberately unthrottled in Nginx. This semaphore is the only
+    thing standing between a client replaying an archived day and `max_connections`.
+    """
+    live = 0
+    peak = 0
+
+    async def _slow(*_args, **_kwargs):
+        nonlocal live, peak
+        live += 1
+        peak = max(peak, live)
+        try:
+            await asyncio.sleep(0.02)
+            # Answer "this tile is empty" so the request ends at 204 and never walks
+            # on to the upstream steps — the bound is what is under test, not the fetch.
+            return {(5, 16, 11)}
+        finally:
+            live -= 1
+
+    monkeypatch.setattr(views, "_archived_empty", _slow)
+    # Rebuild the loop-bound semaphore so it picks up the overridden setting.
+    views._archive_sem = None
+
+    async def _one(x):
+        return await async_client.get(f"/tiles/{DATE}/{TS}/5/{x}/11.png")
+
+    # A full frame's worth of misses, as one page-load fan-out would produce.
+    await asyncio.gather(*(_one(16) for _ in range(24)))
+    assert peak <= 3, f"archive lookups ran {peak}-wide against a cap of 3"
 
 
 # -- provider selection + advert ----------------------------------------------

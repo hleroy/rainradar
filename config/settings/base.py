@@ -300,6 +300,16 @@ TILE_FETCH_CONCURRENCY = 8
 # a wide burst (a cold-cache page-load fans out ~60 tiles at once), so this caps
 # concurrent connections regardless of how many requests arrive. Keep it small.
 UPSTREAM_TILE_CONCURRENCY = 4
+# Ceiling on *simultaneous* archive-row lookups from the tile fallback, per worker.
+# Django's ASGI handler runs each request on its own thread and a DB connection is
+# thread-local, so an unbounded fan-out of tile misses is an unbounded fan-out of
+# Postgres connections — which is exactly how the fallback once exhausted
+# max_connections and 500'd. With WEB_CONCURRENCY=4 this caps the whole tile path at
+# ~16 connections regardless of how many requests arrive.
+TILE_ARCHIVE_LOOKUP_CONCURRENCY = 4
+# Total budget (s) for one archive-row lookup, covering the queue wait *and* the
+# query. Past it the tile sheds with a non-cacheable 503 rather than piling up.
+TILE_ARCHIVE_LOOKUP_TIMEOUT = 2.0
 # Minimum spacing between consecutive upstream tile requests (s), process-wide.
 # UPSTREAM_TILE_CONCURRENCY alone bounds *simultaneity*, not *rate*: four slots
 # recycled over a keep-alive connection still emit hundreds of requests a minute,
@@ -339,7 +349,13 @@ LIGHTNING_RECENT_SECONDS = 300
 LIGHTNING_SSE_HEARTBEAT_SECONDS = 20
 LIGHTNING_DISPLAY_HOURS = 12
 LIGHTNING_REBIN_SECONDS = 60
-LIGHTNING_HISTORY_MAX_SPAN_SECONDS = 86400
+# The strike pool has to cover whatever radar range /api/radar/frames just served,
+# plus lightning.js's one-slice lead-in (SLICE_FALLBACK_S) — that is the definition of
+# ensurePool(). Derived, not a standalone number: a hardcoded 86400 was smaller than
+# both, so a full archived day (86100 s of frames + 600 s lead-in) always 400'd
+# `range_too_large` and the layer silently came up empty. LIGHTNING_HISTORY_MAX_STRIKES
+# is what actually bounds the response; the span cap only bounds the scan.
+LIGHTNING_HISTORY_MAX_SPAN_SECONDS = MAX_QUERY_SPAN_SECONDS + 3600
 LIGHTNING_HISTORY_MAX_STRIKES = 50000
 # Lightning archive horizon; tracks the shared radar RETENTION_DAYS.
 LIGHTNING_RETENTION_DAYS = RETENTION_DAYS

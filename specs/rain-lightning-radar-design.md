@@ -251,14 +251,47 @@ Two consequences of Météo-France being *latest-only* upstream:
 - The web container's fallback tile view can only render frames *that worker* has polled.
   That is acceptable because the archiver persists every frame to disk; the fallback is a
   rare cache-miss path, not the primary tile source.
-- …but only because the fallback consults the archive row *before* upstream. A sparse
-  archive stores nothing for an empty tile, so "no file on disk" is the normal state for
-  most of the matrix on a quiet day, and every one of those tiles misses Nginx and reaches
-  Django. For the newest frame `ts` is still upstream's latest, so each such miss would
-  otherwise re-download the ~1.7 MB product and re-render all 62 tiles in the web
-  container — the exact cost the archiver already paid. The frame row's `empty` list
-  settles it with one indexed query instead (`views._archived_empty`), and the resulting
-  204 carries the same `immutable` header as a real tile, so the browser asks once.
+- …but only because the fallback settles a miss from the *archive* before ever asking
+  upstream. A sparse archive stores nothing for an empty tile, so "no file on disk" is the
+  normal state for most of the matrix on a quiet day, and every one of those tiles misses
+  Nginx and reaches Django. For the newest frame `ts` is still upstream's latest, so each
+  such miss would otherwise re-download the ~1.7 MB product and re-render all 62 tiles in
+  the web container — the exact cost the archiver already paid.
+
+#### 5.2.1 The tile miss ladder
+
+`views.tile` answers a miss in four tiers, cheapest first. Every "nothing to draw" answer
+carries the same `immutable` header as a real tile, so the browser asks once.
+
+1. **Nginx static** — an archived non-empty tile never reaches Django at all.
+2. **Redis** (`radar:{provider}:archived`, one `SISMEMBER`). `status='ok'` means every
+   matrix tile was attempted and none errored, so each one is either on disk or on the
+   row's `empty` list — and the archived set holds exactly the ok frames. "In the set,
+   not on disk" therefore already means "nothing to draw", with no row lookup at all.
+   This tier is the whole of historical navigation, and it costs Postgres nothing.
+3. **The frame row's `empty` list** (`views._archived_empty`, one indexed query), reached
+   only for a frame that is not yet fully archived — the live one, or a partial one still
+   being retried.
+4. **Upstream**, as above.
+
+Tier 3 is **bounded and time-boxed** (`TILE_ARCHIVE_LOOKUP_CONCURRENCY`,
+`TILE_ARCHIVE_LOOKUP_TIMEOUT`) by a loop-bound semaphore, because it is the one DB access
+in the whole app reached once per *tile* rather than once per request. Django's ASGI
+handler runs each request in its own `ThreadSensitiveContext` and a Django connection is
+thread-local, so without that bound N concurrent tile misses are N concurrent Postgres
+connections — and `/tiles/…` is deliberately unthrottled in Nginx. Unbounded, replaying an
+archived day exhausted `max_connections` and turned every tile into a 500.
+
+Both cache tiers are **best-effort**: a Redis hiccup falls through to tier 3, and a tier-3
+timeout or DB error sheds with a **503 + `no-store`** (`views._tile_unavailable`) — never
+a 500, and never a 204. 204 would claim the tile is empty when we do not know that, and
+it is `immutable`, which would pin a blank tile in every visitor's cache for a year.
+`tile_fallback` records the outcome as `archived_frame`, `archived_empty`, `gone`,
+`fetched`, `empty`, `error` or `db_unavailable`.
+
+A Redis flush (there is no persistence) simply misses tier 2 until `poll_radar`'s
+cold-start branch rebuilds the set on the next poll — degrading to the bounded tier 3,
+not to an outage.
 
 ### 5.3 Upstream fetch throttling and backoff
 
