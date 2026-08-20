@@ -47,6 +47,17 @@ updates:
     # Every weekday
     schedule:
       interval: 'daily'
+    # A Postgres *major* bump is a data migration, not a dependency bump: the
+    # server refuses to start against a PGDATA directory written by the previous
+    # major, so changing the tag alone would take production down until someone
+    # runs pg_upgrade or a dump/restore. That is an operator decision with a
+    # maintenance window attached — never something to land from a bot PR. Minor
+    # and patch updates stay enabled. Scoped to `postgres` so traefik, nginx,
+    # node and aws in this same group keep receiving major bumps.
+    ignore:
+      - dependency-name: 'postgres'
+        update-types:
+          - 'version-update:semver-major'
 
   # Enable version updates for Docker Compose files
   - package-ecosystem: 'docker-compose'
