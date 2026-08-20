@@ -359,22 +359,6 @@ def _emit_tile_fallback(  # noqa: PLR0913, PLR0917 — provider + tile coords + 
     emit(logger, level, "tile_fallback", provider=provider, ts=ts, z=z, x=x, y=y, result=result)
 
 
-async def tile_legacy(  # noqa: PLR0913, PLR0917 — tile coords are the irreducible inputs
-    request: HttpRequest,
-    date: str,
-    ts: int,
-    z: int,
-    x: int,
-    y: int,
-) -> HttpResponse:
-    """GET /tiles/{date}/{ts}/{z}/{x}/{y}.png — the legacy URL, aliased to rainviewer.
-
-    Kept for this MVP so SW-cached old shells keep working; remove in a later MVP
-    (see TODO.md). Dispatches to :func:`tile` with ``provider="rainviewer"``.
-    """
-    return await tile(request, "rainviewer", date, ts, z, x, y)
-
-
 async def tile(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0917 — coords + the miss ladder
     _request: HttpRequest,
     provider: str,
@@ -409,12 +393,6 @@ async def tile(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0917 — coords + t
     path = storage.tile_path(provider, ts, z, x, y, date=date)
     if await sync_to_async(path.is_file)():
         return _tile_file_response(await sync_to_async(path.open)("rb"))
-    # 2b. rainviewer legacy dual-read: during the brief post-deploy window before the
-    #     startup rename, tiles may still sit at the old {TILE_ROOT}/{date}/… path.
-    if provider == "rainviewer":
-        legacy = storage.tile_root() / date / str(ts) / str(z) / str(x) / f"{y}.png"
-        if await sync_to_async(legacy.is_file)():
-            return _tile_file_response(await sync_to_async(legacy.open)("rb"))
 
     # 3. Miss -> settle it from the archive before ever asking upstream. A frame is
     #    immutable once published, so a tile the archiver already found empty is

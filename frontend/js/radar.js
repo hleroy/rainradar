@@ -795,7 +795,7 @@ export async function initRadar(
       frames: frames.filter((_, i) => !inGap(i)), // ordered, gap frames removed
       cursorTs: frames[position]?.timestamp, // current scrubber position
       radarBounds, // L.LatLngBounds | null
-      tileUrl, // (ts) => "/tiles/{date}/{ts}/{z}/{x}/{y}.png"
+      tileUrl, // (ts) => "/tiles/{provider}/{date}/{ts}/{z}/{x}/{y}.png"
       attribution, // provider credit (HTML) for the burned-in caption
       opacity: radarOpacity, // user-set rain opacity (default 0.8)
       tileSize: TILE_OPTS.tileSize, // 256

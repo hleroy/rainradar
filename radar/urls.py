@@ -19,13 +19,6 @@ urlpatterns = [
         views.tile,
         name="tile",
     ),
-    # Legacy tile path, kept as a rainviewer alias for SW-cached old shells
-    # (remove in a later MVP — see TODO.md).
-    path(
-        "tiles/<str:date>/<int:ts>/<int:z>/<int:x>/<int:y>.png",
-        views.tile_legacy,
-        name="tile_legacy",
-    ),
     # About dialog statistics: read-only, Redis-cached JSON.
     path("api/stats", views.stats, name="stats"),
     path("metrics", views.metrics, name="metrics"),

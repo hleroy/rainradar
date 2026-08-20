@@ -27,7 +27,7 @@ pytestmark = [pytest.mark.asyncio, pytest.mark.django_db(transaction=True)]
 TS = 1683790200
 DATE = "2023-05-11"
 TILE_URL = "https://tilecache.rainviewer.com/v2/radar/1a2b3c4d5e6f/256/5/16/11/2/1_1.png"
-TILE_PATH = f"/tiles/{DATE}/{TS}/5/16/11.png"
+TILE_PATH = f"/tiles/rainviewer/{DATE}/{TS}/5/16/11.png"
 
 
 async def _noop(*_args, **_kwargs) -> None:
@@ -291,7 +291,7 @@ async def test_tile_miss_fetches_persists_and_returns(async_client, sample_weath
 
 @respx.mock
 async def test_tile_invalid_zoom_returns_404(async_client):
-    resp = await async_client.get(f"/tiles/{DATE}/{TS}/8/16/11.png")
+    resp = await async_client.get(f"/tiles/rainviewer/{DATE}/{TS}/8/16/11.png")
     assert resp.status_code == 404
 
 
@@ -302,7 +302,7 @@ async def test_tile_outside_matrix_returns_404(async_client, sample_weather_maps
     frames_route = respx.get(settings.RAINVIEWER_API_URL).mock(
         return_value=httpx.Response(200, json=sample_weather_maps),
     )
-    resp = await async_client.get(f"/tiles/{DATE}/{TS}/5/0/0.png")
+    resp = await async_client.get(f"/tiles/rainviewer/{DATE}/{TS}/5/0/0.png")
     assert resp.status_code == 404
     assert frames_route.call_count == 0
     assert not storage.tile_exists("rainviewer", TS, 5, 0, 0)
@@ -314,7 +314,7 @@ async def test_tile_bad_date_for_ts_returns_404(async_client, sample_weather_map
         return_value=httpx.Response(200, json=sample_weather_maps),
     )
     # 2020-01-01 does not match the UTC date of TS -> 404 before any fetch.
-    resp = await async_client.get(f"/tiles/2020-01-01/{TS}/5/16/11.png")
+    resp = await async_client.get(f"/tiles/rainviewer/2020-01-01/{TS}/5/16/11.png")
     assert resp.status_code == 404
 
 
@@ -323,7 +323,7 @@ async def test_tile_unknown_timestamp_returns_404(async_client, sample_weather_m
     respx.get(settings.RAINVIEWER_API_URL).mock(
         return_value=httpx.Response(200, json=sample_weather_maps),
     )
-    resp = await async_client.get("/tiles/2001-09-09/999/5/16/11.png")
+    resp = await async_client.get("/tiles/rainviewer/2001-09-09/999/5/16/11.png")
     assert resp.status_code == 404
 
 
@@ -431,7 +431,7 @@ async def test_tile_aged_out_of_the_live_window_returns_cacheable_204(
         status="partial",
         missing=[{"z": 5, "x": 16, "y": 11}],
     )
-    resp = await async_client.get("/tiles/1970-01-01/999/5/16/11.png")
+    resp = await async_client.get("/tiles/rainviewer/1970-01-01/999/5/16/11.png")
     assert resp.status_code == 204
     assert resp["Cache-Control"] == "public, max-age=31536000, immutable"
 
@@ -545,7 +545,7 @@ async def test_tile_archive_lookup_is_concurrency_bounded(async_client, monkeypa
     views._archive_sem = None
 
     async def _one(x):
-        return await async_client.get(f"/tiles/{DATE}/{TS}/5/{x}/11.png")
+        return await async_client.get(f"/tiles/rainviewer/{DATE}/{TS}/5/{x}/11.png")
 
     # A full frame's worth of misses, as one page-load fan-out would produce.
     await asyncio.gather(*(_one(16) for _ in range(24)))
@@ -653,24 +653,19 @@ async def test_range_is_per_provider(async_client):
     assert mf.json() == {"earliest": 2000, "latest": 3000}
 
 
-# -- provider-scoped tile routes ----------------------------------------------
-
-RV_TILE_PATH = f"/tiles/rainviewer/{DATE}/{TS}/5/16/11.png"
-MF_TILE_PATH = f"/tiles/meteofrance/{DATE}/{TS}/5/16/11.png"
-
-
-async def test_provider_scoped_tile_disk_hit(async_client, png_bytes):
-    await RadarFrame.objects.acreate(
-        timestamp=TS,
-        provider="rainviewer",
-        tile_count=62,
-        status="ok",
-        missing=[],
-    )
+async def test_legacy_unscoped_tile_url_is_gone(async_client, png_bytes):
+    # The pre-provider /tiles/{date}/… alias was removed once every SW-cached shell
+    # had auto-updated. It must stay removed: no route, so URL resolution 404s
+    # before the view is ever reached, even for a tile that exists on disk.
     storage.write_tile("rainviewer", TS, 5, 16, 11, png_bytes)
-    resp = await async_client.get(RV_TILE_PATH)
-    assert resp.status_code == 200
-    assert b"".join(resp.streaming_content) == png_bytes
+    resp = await async_client.get(f"/tiles/{DATE}/{TS}/5/16/11.png")
+    assert resp.status_code == 404
+
+
+# -- the meteofrance tile route -----------------------------------------------
+# The rainviewer route is covered above; TILE_PATH is provider-scoped like this one.
+
+MF_TILE_PATH = f"/tiles/meteofrance/{DATE}/{TS}/5/16/11.png"
 
 
 @override_settings(METEOFRANCE_ENABLED=True)
@@ -694,58 +689,3 @@ async def test_meteofrance_tile_404_when_disabled(async_client, png_bytes):
     storage.write_tile("meteofrance", TS, 5, 16, 11, png_bytes)
     resp = await async_client.get(MF_TILE_PATH)
     assert resp.status_code == 404
-
-
-async def test_rainviewer_legacy_path_dual_read(async_client, png_bytes):
-    # A tile still at the legacy path is served via the rainviewer dual-read.
-    await RadarFrame.objects.acreate(
-        timestamp=TS,
-        provider="rainviewer",
-        tile_count=62,
-        status="ok",
-        missing=[],
-    )
-    legacy = storage.tile_root() / DATE / str(TS) / "5" / "16" / "11.png"
-    legacy.parent.mkdir(parents=True, exist_ok=True)
-    legacy.write_bytes(png_bytes)
-    resp = await async_client.get(RV_TILE_PATH)
-    assert resp.status_code == 200
-    assert b"".join(resp.streaming_content) == png_bytes
-
-
-async def test_legacy_tile_url_aliases_rainviewer(async_client, png_bytes):
-    # The legacy /tiles/{date}/… URL serves the rainviewer tile from the new layout.
-    await RadarFrame.objects.acreate(
-        timestamp=TS,
-        provider="rainviewer",
-        tile_count=62,
-        status="ok",
-        missing=[],
-    )
-    storage.write_tile("rainviewer", TS, 5, 16, 11, png_bytes)
-    resp = await async_client.get(TILE_PATH)  # legacy /tiles/{date}/…
-    assert resp.status_code == 200
-    assert b"".join(resp.streaming_content) == png_bytes
-
-
-# -- health -------------------------------------------------------------------
-
-
-async def test_healthz_ok(async_client):
-    resp = await async_client.get("/healthz")
-    assert resp.status_code == 200
-    assert resp.json() == {"status": "ok"}
-
-
-async def test_readyz_ok(async_client):
-    resp = await async_client.get("/readyz")
-    assert resp.status_code == 200
-
-
-async def test_readyz_503_when_redis_down(async_client, monkeypatch):
-    async def _down() -> bool:
-        return False
-
-    monkeypatch.setattr(cache, "ping", _down)
-    resp = await async_client.get("/readyz")
-    assert resp.status_code == 503

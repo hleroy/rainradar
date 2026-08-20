@@ -50,14 +50,6 @@ touching the repo; delete entries once done.
   both the archive and the wire — `specs/tile-serving-performance.md` §3.5 has a
   measurement script.
 
-- **After 2026-08-18:** remove the legacy tile-URL compatibility layer that
-  shipped with provider-scoped tile paths — the `/tiles/{date}/{ts}/…` Django
-  route alias (`config/urls.py`), the Nginx `^/tiles/(\d{4}-…)` →
-  `/tiles/rainviewer/$1` rewrite (`compose/nginx/`), and the
-  rainviewer legacy-path dual-read in the tile view (`radar/views.py`).
-  By then every SW-cached client has auto-updated to the provider-scoped
-  URLs and the archiver-startup layout migration has long since run.
-
 - **Undecided (raised 2026-08-02):** the Django admin is unreachable in
   production and no decision has been made on whether to fix it, drop it, or
   leave it. It *is* wired — `django.contrib.admin` in `INSTALLED_APPS`, mounted

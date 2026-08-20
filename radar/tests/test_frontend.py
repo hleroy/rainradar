@@ -544,6 +544,11 @@ def test_sw_cache_version_bumped_for_refresh_crossfade():
     assert 'CACHE_VERSION = "v14"' not in sw  # shell changed (radar.js)
 
 
+def test_sw_cache_version_bumped_for_legacy_tile_url_removal():
+    sw = _read("sw.js")
+    assert 'CACHE_VERSION = "v22"' not in sw  # shell changed (radar.js + clip.js)
+
+
 # -- standalone layers explainer (/apropos, /about) ---------------------------
 
 # The explainer ships as two documents sharing one stylesheet and one script.

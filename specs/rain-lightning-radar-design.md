@@ -458,10 +458,6 @@ Nginx serves this tree directly with a strict numeric regex (path-traversal defe
 `Cache-Control: public, max-age=31536000, immutable` — archived tiles never change — with
 a `try_files` fallback to Django for tiles not yet written.
 
-A transitional legacy route `/tiles/{date}/…` aliases `provider=rainviewer` for
-service-worker-cached old shells, both as an Nginx rewrite and a Django route. It is
-slated for removal (see `TODO.md`).
-
 ### 6.3 Storage budget
 
 Provisioned volume is 20 GiB (`STORAGE_CAPACITY_BYTES`), which backs the
@@ -769,7 +765,6 @@ stream sets its own headers and is exempt.
 | `GET /api/radar/latest[?provider=]`                 | `{timestamp}`                                                             | Newest live frame straight from the provider                                            |
 | `GET /api/radar/range[?provider=]`                  | `{earliest, latest}`                                                      | Per-provider archive bounds for the date picker (Redis-cached 60 s)                     |
 | `GET /tiles/{provider}/{date}/{ts}/{z}/{x}/{y}.png` | PNG, `immutable`                                                          | Nginx-static; `try_files` falls back to Django, which answers a known-empty tile 204 (also `immutable`) before going upstream |
-| `GET /tiles/{date}/{ts}/{z}/{x}/{y}.png`            | PNG                                                                       | Legacy alias for `provider=rainviewer`; scheduled for removal (`TODO.md`)               |
 | `GET /api/lightning/stream`                         | SSE `event: strike`                                                       | Replays the recent buffer, then tails Redis pub/sub; heartbeat comments; never buffered |
 | `GET /api/lightning/history?from=&to=[&bbox=]`      | `{strikes[], truncated, attribution}`                                     | ≤ 24 h span, ≤ 50 000 strikes (newest kept)                                             |
 | `POST /api/alerts/subscribe`                        | `{ok:true}`                                                               | Upsert a Web Push subscription by endpoint; 404 when the flag is off                    |
