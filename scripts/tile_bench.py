@@ -2,55 +2,38 @@
 # Host-run load generator: prints freely, opens https URLs, long argparse main().
 """Per-tier load generator for the tile endpoint.
 
-WHY NOT A GENERIC TOOL (wrk/oha/k6): "how fast can rainradar serve" has no single
-answer, because /tiles/… is served by four different code paths with costs that
-differ by orders of magnitude:
+/tiles/... is served by paths whose costs differ by orders of magnitude, so a
+single blended number would say nothing about the server. This script first
+probes real tile URLs and sorts them into pools by what actually answered
+(static_200 = Nginx file, empty_204 = Django fallback), then loads each pool
+separately. Two modes: `ramp` (closed loop, steps concurrency up to find max
+throughput) and `rate` (open loop, Poisson arrivals, honest latency at a given
+offered load). Load is spread over P processes x 1 asyncio loop x C keep-alive
+connections; the report prints the CPU cores the generator itself burned --
+if that nears your core count, the server numbers are a floor, not a result.
 
-    tier 0  Nginx static      archived non-empty tile   -> 200 + bytes
-    tier 1  Redis SISMEMBER   archived frame, no file   -> 204, no body
-    tier 2  Postgres row      live/partial frame        -> 204, no body
-    tier 3  upstream fetch    unarchived frame          -> product download + render
+Frames are sampled from a past day and --skip-recent drops the newest ones, so
+the upstream-fetch path is never reached (it would pull Meteo-France products).
+Non-localhost targets require --allow-prod: the archiver shares the production
+host, and a Meteo-France frame missed while starved is lost permanently.
 
-A blended "hammer the site" number is the weighted average of whatever mix you
-happened to request, which is not a property of the server. So this script
-CLASSIFIES real URLs first (phase 1) and then loads each class separately.
+Needs aiohttp on the host (not an app dependency):
 
-Tier 3 is deliberately never targeted: it triggers a ~1.7 MB Météo-France product
-download and a 62-tile render per frame. Hammering it would DDoS a third party.
---skip-recent drops the newest frames so we cannot reach it.
+    uv pip install --system aiohttp uvloop
 
-METHODOLOGY
-  * Closed loop (--mode ramp) answers "max throughput": N connections in a
-    request->response->request cycle, concurrency stepped up until throughput
-    plateaus. Its latency numbers suffer COORDINATED OMISSION -- a slow response
-    stops that connection from issuing more requests, so the sample is biased
-    toward fast responses.
-  * Open loop (--mode rate) answers "latency at an offered load": arrivals follow
-    a Poisson process at a fixed rate, and latency is measured from the INTENDED
-    arrival instant, not from when the request was actually sent. That is the
-    Gil Tene correction: queueing delay lands in the number instead of vanishing.
-  Run ramp to find the knee, then rate at fractions of it for honest percentiles.
+EXAMPLES
+    # Classify tiles from yesterday and write rrbench_pool.json, no load
+    ./scripts/tile_bench.py --mode discover
 
-CONCURRENCY MODEL (the "efficient multithreading" question)
-  Threads are the wrong primitive in CPython for this: the GIL serialises the
-  parse/TLS work and each thread costs a stack. The right shape is
-      P processes  x  1 asyncio event loop each  x  C keep-alive connections
-  Processes sidestep the GIL and spread across cores; the event loop makes each
-  process handle thousands of in-flight sockets with no per-request thread; and
-  keep-alive is mandatory -- this box has ~28k ephemeral ports
-  (net.ipv4.ip_local_port_range), so a connection-per-request run would exhaust
-  them in seconds and then measure TIME_WAIT, not the server.
+    # Find the knee against the local dev stack (default steps 8..256)
+    ./scripts/tile_bench.py --mode ramp
 
-  The script reports the CPU cores IT consumed. If that approaches your core
-  count, or the achieved rate falls short of the offered rate in --mode rate,
-  the GENERATOR is the bottleneck and the server numbers are a floor, not a
-  measurement. Always check that line before believing a result.
+    # Production, Nginx pool only, custom concurrency steps
+    ./scripts/tile_bench.py --base https://rainradar.hleroy.com --allow-prod \\
+        --pool static_200 --steps 8,24,120,504
 
-SAFETY
-  Non-localhost targets require --allow-prod. Bear in mind what you are loading:
-  the archiver shares the production host, and Météo-France is latest-only --
-  a frame it misses is lost permanently, with no backfill. Prefer short runs,
-  and watch `docker compose logs -f archiver` while you do them.
+    # Honest percentiles at 400 req/s against the Django fallback
+    ./scripts/tile_bench.py --mode rate --rate 400 --pool empty_204 --duration 30
 """
 
 from __future__ import annotations
@@ -73,7 +56,7 @@ from urllib.parse import urlparse
 
 try:
     import aiohttp
-except ImportError:  # not an app dependency -- see the module docstring
+except ImportError:  # host-only tool, so aiohttp is deliberately not in pyproject
     sys.exit("tile_bench needs aiohttp on the host: uv pip install --system aiohttp uvloop")
 
 try:
@@ -205,7 +188,7 @@ async def _session(conns: int) -> aiohttp.ClientSession:
         limit_per_host=conns,
         ttl_dns_cache=600,
         ssl=_ssl_ctx(),
-        force_close=False,  # keep-alive: see the port-exhaustion note up top
+        force_close=False,  # keep-alive: a connection per request exhausts ephemeral ports
         enable_cleanup_closed=True,
     )
     return aiohttp.ClientSession(
