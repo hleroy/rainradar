@@ -293,6 +293,11 @@ A Redis flush (there is no persistence) simply misses tier 2 until `poll_radar`'
 cold-start branch rebuilds the set on the next poll — degrading to the bounded tier 3,
 not to an outage.
 
+> **Proposed, not implemented:** load testing on 2026-08-20 showed tiers 2–3 plateau at
+> ~700 req/s while tier 1 serves ≥1,458. `specs/tile-serving-performance.md` proposes
+> lifting the tier-2 answer into Nginx via an archiver-written `.complete` sentinel per
+> frame directory. The ladder above is what runs today.
+
 ### 5.3 Upstream fetch throttling and backoff
 
 RainViewer's free tier returns **HTTP 429** under a wide burst even though no limit is
