@@ -4,14 +4,34 @@
 
 const TILE_OPTS = { tileSize: 256, opacity: 0, maxNativeZoom: 7, maxZoom: 12, pane: "radar" };
 const FRAME_MS = 500; // play speed
-const REFRESH_MS = 5 * 60 * 1000; // re-fetch live frame index every 5 min
-const REFRESH_MAX_MS = 30 * 60 * 1000; // backoff ceiling when the server sheds load
 const LIVE_OPACITY = 0.8; // default; the settings popover can override (persisted)
 const OPACITY_MIN = 0.2; // a fully invisible radar would read as "broken"
 const DAY_SECONDS = 86400;
-// Fallback gap tolerance before the providers advert loads (1.5 × RainViewer's 600 s);
-// once the advert arrives it becomes 1.5 × the active provider's frame_interval.
-const DEFAULT_GAP_TOLERANCE_S = 900;
+// Fallback cadence before the providers advert loads (RainViewer's 600 s); once it
+// arrives, both the gap tolerance and the refresh anchor follow the active provider's
+// frame_interval — the client hardcodes no frame cadence of its own.
+const DEFAULT_FRAME_INTERVAL_S = 600;
+const DEFAULT_GAP_TOLERANCE_S = 1.5 * DEFAULT_FRAME_INTERVAL_S;
+
+// Live-refresh scheduling. A frame is published some seconds after the timestamp it
+// carries (measured in production: ~140–217 s Météo-France, ~94–339 s RainViewer), so
+// the refresh is anchored on `newest_ts + frame_interval + lag`, not on a fixed period —
+// a fixed period aliases against the cadence and can sit a whole frame behind forever.
+// `lag` tracks the observed publication delay: what we measure is an upper bound on the
+// true delay, so it decays a little each cycle to probe earlier, and a miss (which costs
+// one short retry) ratchets it straight back up. That converges per provider without a
+// single provider-specific constant.
+const LAG_INITIAL_S = 150; // inside both providers' measured bands
+const LAG_MIN_S = 60;
+const LAG_MAX_S = 420; // also bounds the retry chase: past this we stop hunting
+const LAG_DECAY_S = 30; // ≥ mean jitter, so the estimate can't ratchet upward forever
+const JITTER_S = 30; // every client anchors off the SAME newest_ts — spread the herd
+const RETRY_S = 30; // short retries while the expected frame hasn't landed yet
+const MIN_DELAY_S = 15; // = FRAMES_LIVE_CACHE_TTL; never poll inside the micro-cache
+const BACKOFF_MIN_CEILING_MS = 10 * 60 * 1000; // a view labelled DIRECT may not stall longer
+
+// Wall clock in epoch seconds, to compare against frame timestamps.
+const nowS = () => Math.floor(Date.now() / 1000);
 
 // UTC calendar date of an epoch-seconds ts (matches storage.utc_date).
 const utcDate = (ts) => new Date(ts * 1000).toISOString().slice(0, 10);
@@ -55,6 +75,14 @@ export async function initRadar(
   let gapToleranceS = DEFAULT_GAP_TOLERANCE_S; // 1.5 × active provider frame_interval
   let archiveDate = null; // remembered archive window (for re-query on a provider switch)
   let archiveTime = null;
+
+  // The active source's cadence, straight from the advert — the single place the
+  // frontend learns a frame interval. Everything cadence-shaped (gap tolerance, the
+  // refresh anchor, the backoff ceiling) derives from this.
+  function frameIntervalS(name = provider) {
+    const entry = providers.find((p) => p.name === name);
+    return entry ? entry.frame_interval : DEFAULT_FRAME_INTERVAL_S;
+  }
 
   // Tiles come from our provider-scoped path; the closure captures the active
   // `provider`, so the clip export (which reuses this fn) follows the switch too.
@@ -390,8 +418,7 @@ export async function initRadar(
     // Adopt the response's serving provider when we have none stored (or it was cleaned).
     if (!provider && data && data.provider) provider = data.provider;
     // Gap tolerance + timeline density follow the active provider's cadence.
-    const active = providers.find((p) => p.name === provider);
-    if (active) gapToleranceS = 1.5 * active.frame_interval;
+    gapToleranceS = 1.5 * frameIntervalS();
     // [S, N, W, E] -> Leaflet bounds [[S, W], [N, E]].
     if (data && Array.isArray(data.bbox) && data.bbox.length === 4) {
       const [s, n, w, e] = data.bbox;
@@ -457,24 +484,39 @@ export async function initRadar(
   }
 
   // Periodic refresh (live only): jump to a newer frame when one appears.
-  // Self-scheduled (not a fixed interval) so a 429/503 backs off exponentially
-  // instead of keeping the cadence against a struggling server, and a hidden
-  // tab skips the network entirely (it catches up on visibilitychange).
-  let refreshDelay = REFRESH_MS;
+  // Self-scheduled (never a fixed interval) so the next attempt can be anchored on the
+  // frame cadence, a 429/503 backs off exponentially instead of keeping the cadence
+  // against a struggling server, and a hidden tab skips the network entirely (it
+  // catches up on visibilitychange).
+  let lagS = LAG_INITIAL_S; // tracked publication delay of the active provider
+  let backoffMs = 0; // 0 while healthy; set only when the server sheds load
 
   async function refresh() {
     if (mode !== "live" || document.hidden) return;
-    const res = await fetchFrames();
+    let res;
+    try {
+      res = await fetchFrames();
+    } catch {
+      // A network-level rejection (offline blip) is a failed fetch, not an escaping
+      // exception — letting it out of the timeout callback would kill the self-
+      // scheduling chain for the life of the page.
+      res = { ok: false, status: 0 };
+    }
     if (!res.ok) {
-      refreshDelay = Math.min(refreshDelay * 2, REFRESH_MAX_MS);
+      const ceiling = Math.max(frameIntervalS() * 1000, BACKOFF_MIN_CEILING_MS);
+      backoffMs = backoffMs ? Math.min(backoffMs * 2, ceiling) : frameIntervalS() * 1000;
       return;
     }
-    refreshDelay = REFRESH_MS;
+    backoffMs = 0;
     const next = res.data.frames || [];
     if (next.length === 0) return;
     const newest = next[next.length - 1].timestamp;
     const prevNewest = frames.length ? frames[frames.length - 1].timestamp : null;
     if (newest === prevNewest) return;
+    // A frame landed: what we just measured is an upper bound on this provider's real
+    // publication delay (we only look at discrete moments), so decay it a little before
+    // storing. Too-early wakes cost one RETRY_S hop and push the estimate back up.
+    lagS = Math.min(LAG_MAX_S, Math.max(LAG_MIN_S, nowS() - newest - LAG_DECAY_S));
 
     const shownTs = frames[position]?.timestamp;
     gaps = res.data.gaps || [];
@@ -501,26 +543,54 @@ export async function initRadar(
     showFrame(frames.length - 1);
   }
 
+  // When to look again. Anchored on the newest frame's OWN timestamp rather than on
+  // "now + a period": a period equal to (or a multiple of) the cadence aliases against
+  // it, and a client that lands just before each publication stays a whole frame behind
+  // indefinitely. Jitter is load-bearing, not cosmetic — every client anchors off the
+  // same newest_ts, so without it they would all fetch on the same second.
+  function nextDelayMs() {
+    const intervalS = frameIntervalS();
+    const jitter = Math.random() * JITTER_S;
+    const spaced = (intervalS + jitter) * 1000;
+    if (backoffMs) return backoffMs;
+    // No network happens in these states, so there is nothing to anchor to.
+    if (document.hidden || mode !== "live" || frames.length === 0) return spaced;
+    const now = nowS();
+    const newest = frames[frames.length - 1].timestamp;
+    // Past the plausible publication window the frame is not merely late — the provider
+    // has stalled or the archive has a gap. Stop hunting and fall back to cadence-spaced
+    // polling, so a stall can never become a permanent RETRY_S poll.
+    if (now > newest + intervalS + LAG_MAX_S) return spaced;
+    // Anchor still ahead ⇒ sleep until it; already past ⇒ short retries until it lands.
+    const due = newest + intervalS + lagS;
+    const delayS = now < due ? due - now + jitter : RETRY_S + jitter;
+    return Math.max(delayS, MIN_DELAY_S) * 1000;
+  }
+
   function scheduleRefresh() {
     if (refreshTimer) clearTimeout(refreshTimer);
     refreshTimer = setTimeout(async () => {
       await refresh();
       scheduleRefresh();
-    }, refreshDelay);
+    }, nextDelayMs());
   }
 
-  // Re-phase the cadence from now and clear any backoff. Entering LIVE is a "give
-  // me the current picture" gesture, so a client that had backed off to the 30-min
-  // ceiling must not stay parked there after the user asks for live.
+  // Re-anchor from the current state and clear any backoff. Entering LIVE is a "give
+  // me the current picture" gesture, so a client that had backed off to the ceiling
+  // must not stay parked there after the user asks for live.
   function resetRefresh() {
-    refreshDelay = REFRESH_MS;
+    backoffMs = 0;
     scheduleRefresh();
   }
 
-  // Returning to the tab: catch up immediately (the hidden-tab refreshes were
-  // skipped), then restart the cadence from now.
+  // Returning to the tab: clear the backoff and catch up immediately (the hidden-tab
+  // refreshes were skipped), then re-anchor. Coming back to the tab is the same "give
+  // me the current picture" gesture as the LIVE button, and clearing only implicitly
+  // (on a successful fetch) leaves a client parked at the ceiling when the catch-up
+  // itself fails on a flaky network.
   document.addEventListener("visibilitychange", async () => {
     if (document.hidden || mode !== "live" || !refreshTimer) return;
+    backoffMs = 0;
     await refresh();
     scheduleRefresh();
   });
@@ -653,7 +723,7 @@ export async function initRadar(
       /* storage blocked; the choice still applies this session */
     }
     const entry = providers.find((p) => p.name === name);
-    if (entry) gapToleranceS = 1.5 * entry.frame_interval;
+    gapToleranceS = 1.5 * frameIntervalS(name);
     swapAttribution(entry);
     clearLayers(); // drop the previous source's tiles
     if (mode === "live") {

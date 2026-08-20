@@ -826,13 +826,50 @@ index keeps refreshing and the window-end label marches on. Once the user has
 deliberately scrubbed or stepped away, their chosen frame is kept instead, until it ages
 out of the live window and there is nothing left to stay on. Scrubbing back onto the
 newest frame re-arms following, and so does the LIVE button — which additionally
-re-phases the refresh cadence and clears any 429/503 backoff, because pressing it is a
+re-anchors the refresh and clears any 429/503 backoff, because pressing it is a
 "give me the current picture" gesture and a client parked at the backoff ceiling must
-not stay there.
+not stay there. Returning to a hidden tab is read as the same gesture, and clears the
+backoff the same way.
 
-The refresh interval itself is still a fixed 5 min rather than derived from
-`provider.frame_interval` — the one place a frame cadence is hardcoded. It is a known
-gap (see `TODO.md`), and it aliases badly against the 300 s Météo-France cadence.
+**The refresh is anchored, not periodic.** A fixed period is the wrong shape here: one
+equal to the cadence — or a multiple of it — aliases against publication, so a client
+that happens to land just before each new frame stays a whole frame behind
+*indefinitely*. That is what a hardcoded 5 min did against Météo-France's 300 s. So the
+next look is scheduled off the newest frame's **own timestamp**:
+`newest_ts + frame_interval + lag`, where `frame_interval` comes from the `providers`
+advert (§12.1) — the frontend hardcodes no cadence of its own, and the same helper feeds
+the gap tolerance.
+
+`lag` is the delay between a frame's timestamp and the moment it is actually fetchable —
+measured in production at ~140–217 s (Météo-France) and ~94–339 s (RainViewer), too wide
+a spread to pick a constant that is neither wasteful nor late. It is therefore *tracked*:
+each landed frame yields `now - newest_ts`, which is an upper bound on the true delay
+(the client only looks at discrete moments), so a small decay is subtracted before
+storing and the value is clamped. The estimate probes earlier each cycle; a wake that is
+too early costs one short retry and ratchets it straight back up. It converges on each
+provider's real behaviour with no provider-specific constant.
+
+Simulated against the measured lag bands, the steady state is ~8 requests/h on RainViewer
+(down from the fixed 12/h) and ~16/h on Météo-France (up from 12/h) — and on **both** it
+sees every published frame, which the fixed period could not promise. Météo-France costs
+slightly more because it publishes twice as often; that is the trade the aliasing fix buys,
+and the endpoint is micro-cached 15 s and ETag-revalidated, so most of those requests are
+empty 304s.
+
+Three guards keep that from degenerating. **Jitter** on every computed delay is
+load-bearing rather than cosmetic: every client anchors off the *same* `newest_ts`, so
+without it they would all fetch on the same second. The retry chase is **bounded** by the
+lag clamp — past the plausible publication window the frame is not late, the provider has
+stalled or the archive has a gap, and the schedule falls back to cadence-spaced polling
+so a stall can never become a permanent 30 s poll. And the backoff ceiling is
+`max(frame_interval, 10 min)` rather than a flat 30 min, because a view labelled DIRECT
+may not sit half an hour behind while it waits out a shedding server.
+
+One failure mode is worth naming because it was invisible: `fetch` *rejects* on a
+network-level error rather than resolving, and the rejection used to escape the async
+timeout callback — so a single offline blip killed the self-scheduling chain for the life
+of the page, and only a reload brought the live view back. A rejection is now treated as
+a failed fetch like any other.
 
 ### 13.2 Mandatory attribution
 

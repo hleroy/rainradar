@@ -483,14 +483,17 @@ def test_live_button_markup_carries_pressed_state():
 
 
 def test_radar_js_entering_live_clears_the_refresh_backoff():
-    """LIVE is a "give me the current picture" gesture: it must re-phase the
+    """LIVE is a "give me the current picture" gesture: it must re-anchor the
     cadence and drop any 429/503 backoff, not no-op like the old startRefresh."""
     radar = _read("js", "radar.js")
     assert re.search(
-        r"function resetRefresh\(\) \{\s*refreshDelay = REFRESH_MS;\s*scheduleRefresh\(\);",
+        r"function resetRefresh\(\) \{\s*backoffMs = 0;\s*scheduleRefresh\(\);",
         radar,
     )
     assert "startRefresh" not in radar
+    # Returning to the tab is the same gesture, so it clears the backoff outright
+    # rather than waiting for a fetch to happen to succeed.
+    assert re.search(r"backoffMs = 0;\s*await refresh\(\);\s*scheduleRefresh\(\);", radar)
 
 
 def test_sw_cache_version_bumped_for_live_edge_fix():
@@ -826,3 +829,88 @@ def test_unknown_paths_are_a_real_404(client):
     """
     assert client.get("/").status_code == 200
     assert client.get("/definitely-not-a-page").status_code == 404
+
+
+# -- the live refresh is anchored on the provider cadence ---------------------
+
+
+def test_radar_js_hardcodes_no_frame_cadence():
+    """The client learns every cadence from the ``providers`` advert.
+
+    A fixed 5-min poll used to live here. Besides violating "no new hardcoded
+    intervals", it aliased: a 300 s period against Météo-France's 300 s cadence can
+    settle just before each publication and stay a full frame behind forever.
+    """
+    radar = _read("js", "radar.js")
+    assert "REFRESH_MS" not in radar
+    assert "REFRESH_MAX_MS" not in radar
+    # One helper is the single place a frame interval enters the frontend.
+    assert "return entry ? entry.frame_interval : DEFAULT_FRAME_INTERVAL_S;" in radar
+    # Gap tolerance derives from it too, rather than repeating the 900 s literal.
+    assert "const DEFAULT_GAP_TOLERANCE_S = 1.5 * DEFAULT_FRAME_INTERVAL_S;" in radar
+    assert radar.count("gapToleranceS = 1.5 * frameIntervalS(") == 2
+
+
+def test_radar_js_anchors_the_refresh_on_the_newest_frame():
+    """The next look is scheduled off the frame's OWN timestamp, plus jitter.
+
+    Anchoring is what breaks the aliasing; the jitter is load-bearing rather than
+    cosmetic, because every client anchors off the same newest_ts and would
+    otherwise hit /api/radar/frames on the very same second.
+    """
+    radar = _read("js", "radar.js")
+    assert "const due = newest + intervalS + lagS;" in radar
+    assert "const jitter = Math.random() * JITTER_S;" in radar
+    assert "const delayS = now < due ? due - now + jitter : RETRY_S + jitter;" in radar
+    # Never poll inside the response micro-cache window.
+    assert "return Math.max(delayS, MIN_DELAY_S) * 1000;" in radar
+
+
+def test_radar_js_tracks_the_publication_lag_within_bounds():
+    """The lag estimate self-tunes per provider, and stays clamped.
+
+    What a client measures is an upper bound on the true delay (it only looks at
+    discrete moments), so it decays each cycle to probe earlier; a too-early wake
+    costs one short retry and pushes it back up.
+    """
+    radar = _read("js", "radar.js")
+    assert (
+        "lagS = Math.min(LAG_MAX_S, Math.max(LAG_MIN_S, nowS() - newest - LAG_DECAY_S));" in radar
+    )
+    # Decay must outweigh the mean jitter, or the estimate ratchets upward forever.
+    lag_decay = int(re.search(r"const LAG_DECAY_S = (\d+);", radar).group(1))
+    jitter = int(re.search(r"const JITTER_S = (\d+);", radar).group(1))
+    assert lag_decay >= jitter / 2
+
+
+def test_radar_js_bounds_the_retry_chase():
+    """A stalled provider must not turn the short retries into a permanent poll."""
+    radar = _read("js", "radar.js")
+    assert "if (now > newest + intervalS + LAG_MAX_S) return spaced;" in radar
+
+
+def test_radar_js_backoff_ceiling_is_cadence_scaled():
+    """A view labelled DIRECT may not sit half an hour behind while shedding."""
+    radar = _read("js", "radar.js")
+    assert "const BACKOFF_MIN_CEILING_MS = 10 * 60 * 1000;" in radar
+    assert "const ceiling = Math.max(frameIntervalS() * 1000, BACKOFF_MIN_CEILING_MS);" in radar
+
+
+def test_radar_js_survives_a_network_level_fetch_rejection():
+    """An offline blip is a failed fetch, not an escaping exception.
+
+    fetch() rejects rather than resolving on a network error, and the rejection used
+    to escape the async setTimeout callback — so the self-scheduling chain never
+    re-armed and the live view stayed frozen until a page reload.
+    """
+    radar = _read("js", "radar.js")
+    assert re.search(
+        r"try \{\s*res = await fetchFrames\(\);\s*\} catch \{",
+        radar,
+    )
+    assert "res = { ok: false, status: 0 };" in radar
+
+
+def test_sw_cache_version_bumped_for_anchored_refresh():
+    sw = _read("sw.js")
+    assert 'CACHE_VERSION = "v21"' not in sw  # shell changed (radar.js)

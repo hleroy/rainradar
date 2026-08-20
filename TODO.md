@@ -82,31 +82,3 @@ touching the repo; delete entries once done.
   `CsrfViewMiddleware`, `AuthenticationMiddleware` and `MessageMiddleware`, which
   cost ~0.54 ms of thread-executor round-trips on *every* request — see the load
   entry at the top and `specs/tile-serving-performance.md` §3.3.
-
-- **Open (raised 2026-08-02, partly fixed 2026-08-03):** the live frame-index
-  refresh interval is still hardcoded and provider-agnostic —
-  `REFRESH_MS = 5 * 60 * 1000` in `frontend/js/radar.js`, with
-  `REFRESH_MAX_MS = 30 * 60 * 1000` as the backoff ceiling. It sits awkwardly
-  against the CLAUDE.md non-negotiable that "the 5-min cadence flows from
-  `provider.frame_interval` — no new hardcoded intervals", and it **aliases**
-  against Météo-France: a 300 s client poll of a 300 s cadence can sit just
-  before each publication and stay a full frame behind indefinitely.
-  **Don't fix it by setting `refreshDelay = frame_interval`** — that reproduces
-  the same aliasing on RainViewer, doubled. Use the cadence as an *anchor*:
-  schedule the next refresh at `newest_ts + frame_interval + lag_margin`
-  (clamped + jittered), then short retries until the frame lands. Measured
-  2026-08-03 against production, frames become visible ~140–217 s (Météo-France)
-  and ~94–339 s (RainViewer) after their own timestamp, so the margin is small
-  and the anchored schedule costs *fewer* requests than today's 12/h.
-  Also still open: whether a 30-min backoff ceiling is too aggressive for a view
-  labelled "DIRECT" (`max(frame_interval, 10 min)` would be defensible), and
-  whether returning to a visible tab should clear the backoff outright.
-
-  Already fixed, and **not** what the original entry suspected: the refresh did
-  run on time, but paused viewers never saw it. `refresh()` re-pinned the cursor
-  to the frame that was showing, so the default (paused) state froze the picture
-  for up to the whole 2 h window while the index kept refreshing — a phone whose
-  screen slept for 40 min came back to a 40-min-old image under a blinking
-  DIRECT pill. The cursor now follows the live edge unless the user deliberately
-  scrubbed away, the pill only claims LIVE while the cursor is at that edge, and
-  the button re-phases the cadence + clears the backoff. See design doc §13.1.
