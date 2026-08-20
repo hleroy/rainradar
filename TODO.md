@@ -18,9 +18,9 @@ touching the repo; delete entries once done.
   all of historical navigation from Python, and is the only item here that changes the
   architecture; **(R2)** put a `limit_conn` on `@django_tiles` so overload sheds as fast
   429s; **(R4)** `open_file_cache` on the static path; **(R5)** palette-quantise the
-  Météo-France PNGs (currently full RGBA, `optimize=False`, ~23.8 KB/tile) — which also
-  bears on the storage-rate entry above. Delete this entry when the spec is either
-  implemented or consciously dropped.
+  Météo-France PNGs (currently full RGBA, `optimize=False`; ~19.8 KiB/tile composited as
+  measured, see spec §3.5) — cuts both the archive and the wire. Delete this entry when
+  the spec is either implemented or consciously dropped.
 
   Measured while writing it, and worth knowing independently of any of the above:
   Django's `MiddlewareMixin.__acall__` wraps every sync `process_request` /
@@ -31,25 +31,6 @@ touching the repo; delete entries once done.
   running them serially). Seven of those 13 hops belong to `Session` / `Csrf` /
   `Authentication` / `Messages`, which exist only for the Django admin — so the
   undecided admin entry below is now also a small performance decision (spec §3.3).
-
-- **After 2026-08-16:** measure the real tile-storage rate now that Météo-France
-  archives in production (enabled in v0.0.18, 2026-08-02) and decide whether
-  anything needs doing. Baseline to compare against: RainViewer alone held 1.6 GB
-  for 2026-06-22 → 2026-08-02 (~38 MB/day; ~4.3 KB/tile across 144 frames/day ×
-  62 tiles), plateauing near 3.4 GB at `RETENTION_DAYS=90`. Météo-France runs at
-  half the frame interval (288 frames/day) into the same 62 tiles, and the
-  REFLECTIVITE wash makes each PNG denser — so the estimate is 77–150 MB/day, but
-  the per-tile size of a composited tile is the unmeasured term. Two weeks of real
-  data settles it. This is informational, not a capacity risk: Docker's
-  `data-root` is `/data/docker` on the host, so `production_radar_tiles` sits on
-  a 213 GB filesystem with ~135 GB free (the host's 77%-full `/` is the OS disk
-  and holds no tiles). Even the high estimate plateaus around 17 GB. Delete this
-  entry once the measured rate is known and unsurprising. Note the lever if the
-  answer *is* surprising: Météo-France tiles are encoded as full RGBA with
-  `optimize=False` and measured ~23.8 KB each, so palette quantisation would cut
-  both the archive and the wire — `specs/tile-serving-performance.md` §3.5 has a
-  measurement script.
-
 - **Undecided (raised 2026-08-02):** the Django admin is unreachable in
   production and no decision has been made on whether to fix it, drop it, or
   leave it. It *is* wired — `django.contrib.admin` in `INSTALLED_APPS`, mounted

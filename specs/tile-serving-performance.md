@@ -219,8 +219,12 @@ The pixels come from a colour LUT, so the true colour count is far below 2²⁴ 
 composited reflectivity wash blends stops, but a palette PNG (`P` mode + `tRNS`) should
 still be visually indistinguishable at a fraction of the bytes.
 
-This pays twice: on the bandwidth-bound static tier (§1), and on the 90-day archive
-(the storage-rate question already open in `TODO.md`).
+This pays twice: on the bandwidth-bound static tier (§1), and on the 90-day archive.
+Measured 2026-08-20 (real prod tiles, `du` over `production_radar_tiles`):
+Météo-France archives ~19.8 KiB/tile composited at ~216 MiB/day (avg ~180 frames/day,
+not the assumed 288), RainViewer ~8.5 KiB/tile at ~73 MiB/day; combined ~25 GiB plateau
+at `RETENTION_DAYS=90` — no capacity concern on the 213 GB tile filesystem, so this
+stays a bandwidth/wire decision, not a storage one.
 
 **Measure before deciding.** On the production host, over real tiles:
 
