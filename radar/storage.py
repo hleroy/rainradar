@@ -10,10 +10,8 @@ Tile layout (authoritative)::
     {TILE_ROOT}/{provider}/{YYYY-MM-DD}/{ts}/{z}/{x}/{y}.png
                 └ source ┘ └ UTC date ┘ └epoch┘ └ slippy indices ┘
 
-The original layout omitted the ``{provider}`` segment; :func:`migrate_legacy_layout`
-folds it under ``rainviewer/`` once at archiver startup. The legacy dual-read for a
-brief post-deploy window lives in the tile view, not here — this module owns only
-the canonical layout.
+This module owns only the canonical layout above; the URL that maps onto it is the
+tile view's business.
 """
 
 from __future__ import annotations
@@ -115,41 +113,14 @@ def provider_dirs() -> list[str]:
     """Provider subtree names present on disk (immediate non-date subdirs of the root).
 
     Lets the janitor purge day dirs under *every* provider's subtree, including a
-    provider that was enabled once and later turned off. Date-named dirs
-    (a pre-migration leftover) are excluded.
+    provider that was enabled once and later turned off. The ``DATE_DIR_RE`` guard
+    keeps a day dir from ever being mistaken for a provider name, so the two levels
+    of the tree can never be confused.
     """
     root = tile_root()
     if not root.is_dir():
         return []
     return sorted(p.name for p in root.iterdir() if p.is_dir() and not DATE_DIR_RE.match(p.name))
-
-
-def migrate_legacy_layout() -> int:
-    """Fold legacy root-level day dirs under ``rainviewer/`` (one-time, idempotent).
-
-    Before provider scoping, tiles lived at ``{TILE_ROOT}/{date}/…``; the canonical layout is
-    ``{TILE_ROOT}/{provider}/{date}/…``. Called once at archiver startup, before the
-    scheduler starts. Each day dir is renamed (same filesystem) into ``rainviewer/``;
-    a target that already exists (a re-run, or a fresh write that beat us) is skipped,
-    so this is safe to run every boot. Provider subtrees (``rainviewer``,
-    ``meteofrance``) don't match ``DATE_DIR_RE`` and are never touched. Returns the
-    number of day dirs moved.
-    """
-    root = tile_root()
-    if not root.is_dir():
-        return 0
-    dest_root = root / "rainviewer"
-    moved = 0
-    for child in root.iterdir():
-        if not (child.is_dir() and DATE_DIR_RE.match(child.name)):
-            continue
-        target = dest_root / child.name
-        if target.exists():
-            continue  # already migrated (idempotent)
-        dest_root.mkdir(parents=True, exist_ok=True)
-        child.rename(target)
-        moved += 1
-    return moved
 
 
 def dir_size(path: Path) -> int:

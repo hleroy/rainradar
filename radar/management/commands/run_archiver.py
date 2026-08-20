@@ -16,12 +16,10 @@ import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
-from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.core.management.base import BaseCommand
 
 from radar import archiver
-from radar import storage
 from radar.logging_json import emit
 from radar.models import RadarFrame
 from radar.providers import enabled_providers
@@ -47,11 +45,6 @@ class Command(BaseCommand):
 
     async def _run(self) -> None:
         await self._wait_for_db()
-
-        # One-time, idempotent fold of the legacy tile layout under rainviewer/,
-        # before the scheduler starts and before anything reads a tile.
-        moved = await sync_to_async(storage.migrate_legacy_layout)()
-        emit(logger, logging.INFO, "legacy_layout_migrated", moved=moved)
 
         # Set the storage gauge's absolute baseline once (full rescan) so the
         # per-poll increments start from the real on-disk size after a restart.

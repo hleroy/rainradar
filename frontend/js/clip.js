@@ -137,7 +137,7 @@ export function initClip({ map, t, showToast, formatTime, formatDate, radar, lig
       minTY = Math.max(minTY, Math.floor(nw.y / ex.tileSize));
       maxTY = Math.min(maxTY, Math.floor(se.y / ex.tileSize));
     }
-    const template = ex.tileUrl(ts); // "/tiles/{date}/{ts}/{z}/{x}/{y}.png" (same-origin)
+    const template = ex.tileUrl(ts); // "/tiles/{provider}/{date}/{ts}/…" (same-origin)
     const jobs = [];
     for (let tx = minTX; tx <= maxTX; tx += 1) {
       for (let ty = minTY; ty <= maxTY; ty += 1) {

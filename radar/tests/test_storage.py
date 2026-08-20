@@ -1,4 +1,4 @@
-"""Tile storage — UTC paths, atomic writes, dir sizing, legacy migration.
+"""Tile storage — UTC paths, atomic writes, dir sizing.
 
 Pure disk I/O against ``tmp_path``; no DB, no network.
 """
@@ -109,47 +109,3 @@ def test_concurrent_writes_same_tile_all_succeed(tile_root):
     assert errors == []
     assert storage.tile_exists(PROVIDER, 1683790200, 5, 16, 11)
     assert list(storage.tile_path(PROVIDER, 1683790200, 5, 16, 11).parent.glob("*.tmp-*")) == []
-
-
-# -- legacy layout migration --------------------------------------------------
-
-
-def _write_legacy_tile(root, date, ts, z, x, y, data=b"legacy"):  # noqa: PLR0913, PLR0917
-    """Create a legacy root-level (no provider segment) tile on disk."""
-    p = root / date / str(ts) / str(z) / str(x) / f"{y}.png"
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_bytes(data)
-    return p
-
-
-def test_migrate_legacy_layout_moves_and_is_idempotent(tile_root):
-    _write_legacy_tile(tile_root, "2023-05-11", 1683790200, 5, 16, 11)
-    _write_legacy_tile(tile_root, "2023-05-12", 1683849600, 5, 16, 11)
-
-    moved = storage.migrate_legacy_layout()
-    assert moved == 2
-    # Tiles now live under rainviewer/; the root-level day dirs are gone.
-    assert storage.tile_exists("rainviewer", 1683790200, 5, 16, 11)
-    assert storage.tile_exists("rainviewer", 1683849600, 5, 16, 11)
-    assert not (tile_root / "2023-05-11").exists()
-
-    # Idempotent: a second pass finds nothing to move.
-    assert storage.migrate_legacy_layout() == 0
-
-
-def test_migrate_legacy_layout_skips_existing_target(tile_root):
-    # A day already present under rainviewer/ must not be clobbered by a stray
-    # legacy dir of the same name (idempotency guard).
-    storage.write_tile("rainviewer", 1683790200, 5, 16, 11, b"canonical")
-    _write_legacy_tile(tile_root, "2023-05-11", 1683790200, 5, 16, 11, data=b"stale")
-
-    moved = storage.migrate_legacy_layout()
-    assert moved == 0
-    # The canonical tile is untouched; the stale legacy dir is left where it is.
-    assert storage.tile_path("rainviewer", 1683790200, 5, 16, 11).read_bytes() == b"canonical"
-    assert (tile_root / "2023-05-11").exists()
-
-
-def test_migrate_legacy_layout_no_root(tmp_path):
-    with override_settings(TILE_ROOT=str(tmp_path / "does-not-exist")):
-        assert storage.migrate_legacy_layout() == 0

@@ -100,8 +100,9 @@ Two things to read off this:
    ~900 req/s as running them one at a time, because each hop is a thread handoff the
    loop must schedule. Concurrency cannot dilute this cost; only removing hops can.
 
-The tile view adds 1–2 more hops of its own (`sync_to_async(path.is_file)`, twice for
-`rainviewer` because of the legacy dual-read).
+The tile view adds one more hop of its own (`sync_to_async(path.is_file)`). It was 1–2
+when this was measured: `rainviewer` paid the check twice, because of the legacy
+`/tiles/{date}/…` dual-read since removed.
 
 The remaining ~4.9 ms is ordinary Django request/response construction, URL resolution,
 uvicorn's HTTP parsing, and the Redis round-trip. There is no single hot spot to delete.
@@ -335,8 +336,6 @@ Notes on the rule:
   that declares its own `add_header`, and the `if`-block inherits from `@tile_empty`
   because it declares none. The 204 carrying `immutable` is the whole point — a
   `Cache-Control`-less 204 would be re-requested on every pan.
-- The legacy `/tiles/{date}/…` location rewrites into this same subtree, so it inherits
-  the behaviour with no extra rule.
 
 ### Backend changes
 

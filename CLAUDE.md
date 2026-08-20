@@ -82,9 +82,7 @@ So, in an environment whose ambient Python is older (Claude Code on the web ship
   the backend and served from `/tiles/{provider}/{date}/{ts}/{z}/{x}/{y}.png`
   (Nginx-static in prod, Django fallback for misses); the Météo-France API base + token
   endpoint are backend-only; lightning reaches the browser only via our SSE + history
-  endpoints. The frontend only ever references our own paths. A transitional legacy
-  route `/tiles/{date}/…` aliases `provider=rainviewer` (SW-cached old shells) — slated
-  for removal (see `TODO.md`).
+  endpoints. The frontend only ever references our own paths.
 - **Provider abstraction:** views/cache never know which radar provider is active. New
   radar sources go behind `RadarProvider` (`radar/providers/`). Météo-France is a
   **fourth failure domain** — one grid fetch per frame, **two when
