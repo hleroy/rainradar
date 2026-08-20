@@ -151,9 +151,39 @@ async def test_history_missing_params_400(async_client):
 
 
 async def test_history_span_too_large_400(async_client):
-    resp = await async_client.get("/api/lightning/history?from=0&to=200000")  # > 86400 default
+    span = settings.LIGHTNING_HISTORY_MAX_SPAN_SECONDS + 1
+    resp = await async_client.get(f"/api/lightning/history?from=0&to={span}")
     assert resp.status_code == 400
     assert resp.json()["error"] == "range_too_large"
+
+
+async def test_history_covers_a_full_archived_day(async_client):
+    """A whole archived day + the layer's lead-in must not be 'range_too_large'.
+
+    The exact request the frontend makes after navigating back one day: the frames
+    endpoint serves 00:00 -> 23:55 (86 100 s) and ``lightning.ensurePool`` widens it by
+    ``SLICE_FALLBACK_S`` (600 s) so the first frame's slice has a predecessor. That is
+    86 700 s — more than the standalone 86 400 cap this used to carry, so every
+    day-navigation 400'd and the layer silently came up empty (``fetchHistory``
+    swallows a non-ok response by design).
+    """
+    await LightningStrike.objects.all().adelete()
+    t_from, t_to = 1787097000, 1787183700
+    assert t_to - t_from == 86700  # the span observed in production
+    resp = await async_client.get(f"/api/lightning/history?from={t_from}&to={t_to}")
+    assert resp.status_code == 200
+    assert resp.json()["strikes"] == []
+
+
+async def test_history_span_covers_the_radar_query_span():
+    """The pool must be able to cover any range /api/radar/frames itself will serve.
+
+    Pins the derivation: these two caps drifting apart is what produced the bug, and a
+    standalone number invites the drift back.
+    """
+    assert settings.LIGHTNING_HISTORY_MAX_SPAN_SECONDS > settings.MAX_QUERY_SPAN_SECONDS, (
+        "the lightning history cap must exceed the radar frames cap, plus the lead-in"
+    )
 
 
 async def test_history_from_after_to_400(async_client):

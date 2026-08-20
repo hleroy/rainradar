@@ -18,7 +18,16 @@ ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS", default=["rainradar.hleroy.com"
 
 # DATABASES
 # ------------------------------------------------------------------------------
-DATABASES["default"]["CONN_MAX_AGE"] = 60
+# 0, deliberately — persistent connections are a WSGI optimisation and are actively
+# harmful here. Django's ASGI handler opens a fresh `ThreadSensitiveContext` per
+# request (one single-worker thread pool each), and a Django connection is
+# thread-local, so the next request lands on a different thread and can never reuse
+# the one this request opened. A non-zero CONN_MAX_AGE therefore buys nothing and
+# leaks: `close_old_connections` leaves the socket open at request end, the request
+# thread then dies with its context, and the connection lingers until GC. Under the
+# tile fallback's fan-out that walked straight into Postgres' max_connections and
+# 500'd every tile — see the miss-ladder tiers in the design doc §5.2.
+DATABASES["default"]["CONN_MAX_AGE"] = 0
 
 # CACHES
 # ------------------------------------------------------------------------------

@@ -5,6 +5,7 @@ specific upstream.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import logging
@@ -274,6 +275,20 @@ def _tile_file_response(handle) -> FileResponse:
     return resp
 
 
+def _tile_unavailable() -> HttpResponse:
+    """503 for a tile whose archive lookup could not be answered — never cached.
+
+    The deliberate counterpart of :func:`_tile_no_content`. When the row lookup times
+    out or the DB is unreachable we do not know whether this tile is empty, so 204
+    would be a lie — and an ``immutable`` one, pinning a blank tile in every visitor's
+    browser cache for a year. ``no-store`` + 503 makes Leaflet raise ``tileerror``,
+    leave the tile blank, and ask again next visit.
+    """
+    resp = HttpResponse(status=503)
+    resp["Cache-Control"] = "no-store"
+    return resp
+
+
 def _tile_no_content() -> HttpResponse:
     """204 for a tile with nothing to draw — cached as hard as a real tile.
 
@@ -305,6 +320,31 @@ async def _archived_empty(provider: str, ts: int) -> set[tuple[int, int, int]] |
     if row is None:
         return None
     return {(e["z"], e["x"], e["y"]) for e in row}
+
+
+_archive_sem: asyncio.Semaphore | None = None
+_archive_sem_loop: asyncio.AbstractEventLoop | None = None
+
+
+def _get_archive_semaphore() -> asyncio.Semaphore:
+    """Loop-bound cap on *simultaneous* archive-row lookups (rebuilt on loop change).
+
+    Mirrors :func:`radar.cache.get_client` and ``alerts.webpush._get_semaphore``: an
+    asyncio primitive belongs to the loop that created it, and WSGI ``runserver`` makes
+    a fresh loop per request.
+
+    Why the tile view needs one at all: Django's ASGI handler runs each request inside
+    its own ``ThreadSensitiveContext`` — a single-worker thread pool per request — and a
+    Django DB connection is thread-local. So N concurrent tile misses are N concurrent
+    Postgres connections, and nothing upstream of here bounds N (``/tiles/…`` is
+    deliberately unthrottled in Nginx). This is the bound.
+    """
+    global _archive_sem, _archive_sem_loop  # noqa: PLW0603
+    loop = asyncio.get_running_loop()
+    if _archive_sem is None or _archive_sem_loop is not loop:
+        _archive_sem = asyncio.Semaphore(settings.TILE_ARCHIVE_LOOKUP_CONCURRENCY)
+        _archive_sem_loop = loop
+    return _archive_sem
 
 
 def _emit_tile_fallback(  # noqa: PLR0913, PLR0917 — provider + tile coords + result are the fields
@@ -376,16 +416,48 @@ async def tile(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0917 — coords + t
         if await sync_to_async(legacy.is_file)():
             return _tile_file_response(await sync_to_async(legacy.open)("rb"))
 
-    # 3. Miss -> ask the archive row before ever asking upstream. A frame is
+    # 3. Miss -> settle it from the archive before ever asking upstream. A frame is
     #    immutable once published, so a tile the archiver already found empty is
-    #    empty forever, and this answers it with one indexed query.
-    #    This is what keeps a sparse-archive provider off the expensive path
-    #    below: Météo-France persists only non-empty tiles, so on a quiet day every
+    #    empty forever. This is what keeps a sparse-archive provider off the expensive
+    #    path below: Météo-France persists only non-empty tiles, so on a quiet day every
     #    tile in the viewport misses the static cache — and for the *newest* frame
     #    each of those used to re-download the ~1.7 MB product and re-render all 62
     #    tiles inside the web container. Leaflet's layer `load` waits for the
     #    slowest tile, so that render was the frontend's whole cross-fade delay.
-    empty = await _archived_empty(provider, ts)
+    #
+    # 3a. Redis first. `status='ok'` means every matrix tile was attempted and none
+    #     errored, so each one is either on disk or in the row's `empty` list — and the
+    #     archived set holds exactly the ok frames. "In the set, not on disk" therefore
+    #     already answers "nothing to draw", with no row lookup at all. That is the
+    #     whole of historical navigation: replaying an archived day used to cost one
+    #     Postgres connection per missing tile, which is how the fallback exhausted
+    #     max_connections and 500'd. A Redis flush just misses here and falls through to
+    #     3b (poll_radar's cold-start branch rebuilds the set on the next poll).
+    #     Best-effort, like every other cache read here: a Redis hiccup must degrade to
+    #     3b, never 500 the tile — that failure mode is the whole point of this change.
+    archived_frame = False
+    with contextlib.suppress(Exception):
+        archived_frame = await cache.is_archived(provider, ts)
+    if archived_frame:
+        # DEBUG for the same reason as `archived_empty` below: the common answer on a
+        # sparse archive, and a pure cache hit.
+        _emit_tile_fallback(provider, ts, z, x, y, "archived_frame", logging.DEBUG)
+        return _tile_no_content()
+
+    # 3b. Not fully archived (the live frame, or a partial one still being retried)
+    #     -> the row, with one indexed query. Bounded and time-boxed: unlike every
+    #     other view's DB access this one is reached once per *tile*, so it is the one
+    #     place a client fan-out translates 1:1 into Postgres connections.
+    try:
+        async with asyncio.timeout(settings.TILE_ARCHIVE_LOOKUP_TIMEOUT):
+            async with _get_archive_semaphore():
+                empty = await _archived_empty(provider, ts)
+    except Exception:  # noqa: BLE001 — DB unreachable/slow: shed, never 500 the tile
+        # Both halves land here on purpose: a TimeoutError (we queued too long) and a
+        # DB error are the same answer to the caller — we cannot say whether this tile
+        # is empty, so we must not pretend to. 503, uncached.
+        _emit_tile_fallback(provider, ts, z, x, y, "db_unavailable", logging.ERROR)
+        return _tile_unavailable()
     if empty is not None and (z, x, y) in empty:
         # DEBUG, not INFO: this is now the common answer for a sparse archive, and
         # it is a cheap cache hit — logging it per tile per client would be pure noise.
