@@ -1,4 +1,4 @@
-FROM docker.io/nginx:1.31.3-alpine
+FROM docker.io/nginx:1.31.4-alpine
 # Remove the default page so nginx can never seed the shared static volume with
 # its own root-owned index.html/50x.html (django populates it via collectstatic).
 RUN rm -rf /usr/share/nginx/html/*
