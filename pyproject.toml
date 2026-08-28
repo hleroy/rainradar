@@ -19,7 +19,7 @@ dependencies = [
   "django==6.1",
   "django-environ==0.14.0",
   "django-redis==7.0.0",
-  "gunicorn==26.1.0",
+  "gunicorn==26.2.0",
   # Météo-France ODIM HDF5 render pipeline: decode HDF5, vectorized
   # reprojection, PNG encode. manylinux wheels only — no GDAL, no host build
   # (all four ship cp314 manylinux wheels, verified by a build spike).
@@ -34,7 +34,7 @@ dependencies = [
   # the evaluator wraps every send in asyncio.to_thread. Pulls py-vapid + cryptography.
   "pywebpush==2.4.0",
   "redis==8.1.0",
-  "uvicorn[standard]==0.52.3",
+  "uvicorn[standard]==0.52.4",
   "uvicorn-worker==0.4.0",
   # WebSocket client for the Blitzortung lightning ingester. httpx cannot
   # do WebSockets, hence the dedicated dep.
