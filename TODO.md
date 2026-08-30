@@ -55,3 +55,12 @@ touching the repo; delete entries once done.
   `CsrfViewMiddleware`, `AuthenticationMiddleware` and `MessageMiddleware`, which
   cost ~0.54 ms of thread-executor round-trips on *every* request — see the load
   entry at the top and `specs/tile-serving-performance.md` §3.3.
+
+- **Watch (raised 2026-08-30):** [Leaflet #10303](https://github.com/Leaflet/Leaflet/issues/10303)
+  asks for the one-finger double-tap-drag zoom in core, with the same direction
+  mapping we ship. Open, labelled `feature` + `needs triage`, no PR and no milestone
+  when checked on 2026-08-30. **Recheck it whenever the vendored Leaflet is bumped**:
+  if it lands upstream, delete `frontend/js/onefingerzoom.js` (and its shell entry, its
+  tests and design §13.8) and switch the core map option on instead. There is a
+  matching note at the top of the module. Until then nothing to do — the two published
+  plugins were evaluated and rejected, see design §13.8.
