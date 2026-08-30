@@ -1021,6 +1021,19 @@ def test_one_finger_zoom_direction_is_named():
     assert "(DOWN_IS_ZOOM_IN ? dy : -dy) / PX_PER_ZOOM_LEVEL" in js
 
 
+def test_one_finger_zoom_yields_to_leaflets_own_animations():
+    """A gesture must never run against an animation Leaflet is already playing.
+
+    `_stop()` cancels pan inertia and any in-flight flyTo — the anchor is read
+    after it, off where the map actually is. A zoom animation is not stoppable that
+    way, so the gesture declines to arm at all while one runs and Leaflet keeps
+    the touch (both of Leaflet's own touch handlers take the same precaution).
+    """
+    js = _read("js", "onefingerzoom.js")
+    assert re.search(r"map\._stop\(\);\s*const point = map\.mouseEventToContainerPoint", js)
+    assert "!map._animatingZoom &&" in js
+
+
 def test_sw_shell_includes_one_finger_zoom():
     sw = _read("sw.js")
     assert '"/static/js/onefingerzoom.js"' in sw

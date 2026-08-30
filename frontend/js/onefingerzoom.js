@@ -55,6 +55,11 @@ export function initOneFingerZoom(map) {
   }
 
   function engage() {
+    // Kill any pan inertia or in-flight flyTo first: `_move` per frame would
+    // otherwise fight a running animation, and the anchor must be read off where
+    // the map actually is. (A zoom animation is not stopped by this, which is why
+    // arming declines while one runs.)
+    map._stop();
     const point = map.mouseEventToContainerPoint(seq.start);
     zoom = {
       start: map.getZoom(),
@@ -120,6 +125,7 @@ export function initOneFingerZoom(map) {
       !!lastTapPoint &&
       Date.now() - lastTapAt <= DOUBLE_TAP_MS &&
       dist(start, lastTapPoint) <= DOUBLE_TAP_SLOP_PX &&
+      !map._animatingZoom && // let Leaflet finish its own zoom rather than fight it
       !!map.touchZoom &&
       map.touchZoom.enabled();
     seq = { start, at: Date.now(), armed };

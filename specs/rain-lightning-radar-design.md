@@ -1033,7 +1033,15 @@ design is defensive on both sides of that recognition:
   by the events it declines to claim, not by toggling handlers — nothing to leave
   wedged if the recogniser mis-fires. A second finger settles the zoom instantly and
   hands the sequence back, so a pinch can start; a throw anywhere inside aborts the same
-  way. The shortcut is expendable, the map is not.
+  way. The shortcut is expendable, the map is not. (The published plugins do disable
+  `dragging` and `doubleClickZoom` for the duration and re-enable them on `zoomend` —
+  which `_moveEnd` fires *only* when the zoom actually changed, so a gesture that lands
+  back on its starting level leaves the map un-draggable. That is the failure this rule
+  exists to make impossible.)
+- **It yields to animations already running.** `_stop()` cancels pan inertia and any
+  in-flight `flyTo` before the anchor is read, and the gesture declines to arm at all
+  while Leaflet is playing a zoom animation — the same precaution Leaflet's own pinch
+  handler takes.
 
 The zoom itself mirrors Leaflet's own pinch handler: fractional `_move()` per animation
 frame while the finger is down, one snapped `_animateZoom()` on release. It pivots on
