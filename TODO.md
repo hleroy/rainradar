@@ -64,3 +64,25 @@ touching the repo; delete entries once done.
   tests and design §13.8) and switch the core map option on instead. There is a
   matching note at the top of the module. Until then nothing to do — the two published
   plugins were evaluated and rejected, see design §13.8.
+
+- **Undecided (raised 2026-08-30):** the frontend has no *executable* test layer. Every
+  assertion in `radar/tests/test_frontend.py` is a string grep over the shipped source,
+  so it pins the implementation rather than the behaviour — a behaviour-preserving
+  rename fails it, and a sign error passes it. That was proportionate while the frontend
+  was mostly wiring, but `frontend/js/onefingerzoom.js` (#20) is a ~230-line stateful
+  gesture recogniser, and the four defects the review of #20/#21 turned up — a stranded
+  non-passive `touchmove` listener, a silently swallowed exception, a page-wide
+  `touchstart` passivity regression, a dead return value — are all things a small
+  harness would have caught and the greps did not. Note the asymmetry: coverage is
+  enforced at ≥85% on `radar/`, and is structurally 0% on `frontend/js/`. The cheap
+  version is a `node --test` file driving a fake `map` with synthetic `TouchEvent`s; it
+  needs no browser, so it does **not** breach the no-Playwright rule, but there is no
+  `package.json` and no node in either image today — which makes it a tooling decision
+  rather than a bug fix, hence this entry and not a PR. Delete once a harness exists or
+  the idea is consciously dropped.
+
+- **Undecided (raised 2026-08-30):** the one-finger zoom (#20) has no in-app affordance
+  and is documented only in `README.md` and design §13.8 — neither `apropos.html` nor
+  `about.html` mentions it, so a user is unlikely to ever find it. Adding it is a
+  product call plus FR/EN i18n copy, not a code fix. Either give it a line in the about
+  pages, or accept it as a power-user shortcut and say so here.
