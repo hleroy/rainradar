@@ -1102,4 +1102,7 @@ def test_one_finger_zoom_exposes_no_unused_api():
 def test_sw_shell_includes_one_finger_zoom():
     sw = _read("sw.js")
     assert '"/static/js/onefingerzoom.js"' in sw
-    assert 'CACHE_VERSION = "v23"' not in sw  # shell changed (new module + main.js)
+    # Ratchet past v24, not v23: the lightning-zoom fix took v24 first, and because
+    # both branches wrote the *identical* line the rebase merged them without a
+    # conflict — two different shells would have shared one cache key.
+    assert 'CACHE_VERSION = "v24"' not in sw  # shell changed (new module + main.js)
