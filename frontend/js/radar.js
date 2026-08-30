@@ -128,21 +128,36 @@ export async function initRadar(
   // polygon in layer-point coordinates (the pane's own coordinate space), so it
   // stays glued to the geography across pan/zoom; recompute when the origin or
   // size changes.
-  function updateRadarClip() {
+  //
+  // An animated zoom offers no such recompute: `_animateZoom` suppresses `move` and
+  // `zoom`, so the only signal is `zoomanim` — fired *before* the new projection is
+  // committed, which is why the corners have to be projected into the view being
+  // zoomed to rather than read off the map's live state. The polygon then rides the
+  // CSS transition in app.css, which is timed to match the transform Leaflet gives
+  // the tiles inside this pane. Without both halves the mask is right at the start
+  // of the gesture, a whole zoom level wrong by the end, and snaps at `zoomend`.
+  function updateRadarClip(center, zoom) {
     if (!radarBounds) return;
     const n = radarBounds.getNorth();
     const s = radarBounds.getSouth();
     const w = radarBounds.getWest();
     const e = radarBounds.getEast();
-    const nw = map.latLngToLayerPoint([n, w]);
-    const ne = map.latLngToLayerPoint([n, e]);
-    const se = map.latLngToLayerPoint([s, e]);
-    const sw = map.latLngToLayerPoint([s, w]);
+    const at =
+      center === undefined
+        ? (ll) => map.latLngToLayerPoint(ll)
+        : (ll) => map._latLngToNewLayerPoint(ll, zoom, center);
+    const nw = at([n, w]);
+    const ne = at([n, e]);
+    const se = at([s, e]);
+    const sw = at([s, w]);
     radarPane.style.clipPath =
       `polygon(${nw.x}px ${nw.y}px, ${ne.x}px ${ne.y}px, ` +
       `${se.x}px ${se.y}px, ${sw.x}px ${sw.y}px)`;
   }
-  map.on("move zoom viewreset zoomend resize", updateRadarClip);
+  // Wrapped, not passed straight in: Leaflet hands the handler an event object, which
+  // would arrive as `center` and send every one of these down the zoomanim path.
+  map.on("move zoom viewreset zoomend resize", () => updateRadarClip());
+  map.on("zoomanim", (ev) => updateRadarClip(ev.center, ev.zoom));
 
   const tsEl = document.getElementById("timestamp");
   const playBtn = document.getElementById("play-btn");

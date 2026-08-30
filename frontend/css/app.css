@@ -598,6 +598,16 @@ body {
   accent-color: var(--accent);
 }
 
+/* The radar bbox mask lives on the pane, but the tiles inside it are transformed by
+   Leaflet's zoom animation. radar.js sets the target polygon on `zoomanim`; this
+   transition carries it there on Leaflet's own timing (see vendor/leaflet.css), so
+   mask and imagery move as one instead of the polygon jumping ahead of the tiles.
+   Deliberately NOT motion-gated: it tracks an animation Leaflet runs unconditionally,
+   so suppressing it would reintroduce exactly the lag it removes. */
+.leaflet-zoom-anim .leaflet-radar-pane {
+  transition: clip-path 0.25s cubic-bezier(0, 0, 0.25, 1);
+}
+
 /* Lightning dots overlay: never intercept map interactions. */
 .lightning-canvas {
   position: absolute;

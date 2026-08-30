@@ -156,6 +156,29 @@ def test_lightning_repaint_reasserts_the_zoom_transform():
     )
 
 
+def test_radar_clip_rides_the_zoom_animation():
+    """The bbox mask must track the tiles it masks through an animated zoom.
+
+    Same failure as the lightning canvas above, one pane over: `_animateZoom`
+    suppresses `move`/`zoom`, so `zoomanim` is the only signal — and it fires before
+    the new projection is committed, so the corners must be projected into the view
+    being zoomed to. The CSS transition is the other half: without it the polygon
+    jumps to the target while the tiles are still interpolating. With neither, the
+    mask is correct at the start of the gesture, a whole zoom level wrong by the end,
+    and snaps back at `zoomend`.
+    """
+    js = _read("js", "radar.js")
+    assert 'map.on("zoomanim", (ev) => updateRadarClip(ev.center, ev.zoom));' in js
+    assert "map._latLngToNewLayerPoint(ll, zoom, center)" in js
+    # Leaflet hands a handler its event object; passing updateRadarClip straight in
+    # would land that in `center` and send every move/zoom down the zoomanim path.
+    assert 'map.on("move zoom viewreset zoomend resize", () => updateRadarClip());' in js
+    css = _read("css", "app.css")
+    assert ".leaflet-zoom-anim .leaflet-radar-pane" in css
+    assert "transition: clip-path 0.25s cubic-bezier(0, 0, 0.25, 1);" in css
+    assert 'CACHE_VERSION = "v25"' not in _read("sw.js")  # shell changed (radar.js, app.css)
+
+
 # -- installable PWA + offline app shell -------------------------------------
 
 
