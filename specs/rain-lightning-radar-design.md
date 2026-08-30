@@ -1043,6 +1043,16 @@ design is defensive on both sides of that recognition:
   while Leaflet is playing a zoom animation — the same precaution Leaflet's own pinch
   handler takes.
 
+One asymmetry is inherited rather than avoided, and is worth knowing before anything
+starts listening for `zoomstart`: `engage()` fires `_moveStart(true, false)`
+unconditionally, while the instant hand-off — `settle(false)` — goes through `_resetView`,
+which fires `zoomend` only when the zoom actually changed. A gesture engaged by a purely
+horizontal slide (so `delta` is exactly 0) and then interrupted by a second finger
+therefore leaves a `zoomstart` unpaired. Leaflet's own `TouchZoom` has the identical
+hole, and nothing in `frontend/js/` listens to `zoomstart` today, so this is faithful
+mirroring rather than a defect — but it is the same shape as the plugin trap above, and
+a future `zoomstart`-gated optimisation would hang on it.
+
 **Upstream.** Core wants this too — [Leaflet #10303](https://github.com/Leaflet/Leaflet/issues/10303)
 requests the identical gesture and the identical direction mapping, but it is open,
 untriaged and unclaimed (no PR, no milestone) as of 2026-08, which is why the field is

@@ -29,10 +29,15 @@ const ENGAGE_PX = 8; // slide this far before the gesture takes over
 const PX_PER_ZOOM_LEVEL = 150; // vertical travel that buys one whole zoom level
 const DOWN_IS_ZOOM_IN = true; // slide down = zoom in (Google Maps); flip to reverse
 
-// Non-passive + capture: capture puts us ahead of Leaflet's own container-level
-// listeners (so an armed sequence can be withheld from the drag handler before it
-// ever sees it), and non-passive keeps preventDefault() available.
+// Capture puts us ahead of Leaflet's own container-level listeners, so an armed
+// sequence can be withheld from the drag handler before it ever sees it. Non-passive
+// keeps preventDefault() available — but only the move and end of an engaged gesture
+// ever call it. `touchstart` never does, and it is the one listener that stays on the
+// document for the life of the page, so it stays passive: a non-passive touchstart
+// there opts the *whole page* out of the browser's scroll-start optimisation, not
+// just the map.
 const LISTEN = { capture: true, passive: false };
+const LISTEN_PASSIVE = { capture: true, passive: true };
 
 export function initOneFingerZoom(map) {
   const container = map.getContainer();
@@ -118,14 +123,16 @@ export function initOneFingerZoom(map) {
       settle(false);
       endSequence();
     }
+    // endSequence() rather than `seq = null`: it is the only thing that detaches the
+    // move listener, and an armed-but-not-yet-engaged sequence has one attached.
     if (e.touches.length !== 1) {
-      seq = null;
+      endSequence();
       clearTapHistory();
       return;
     }
     const touch = e.touches[0];
     if (!isOnMap(e.target)) {
-      seq = null;
+      endSequence();
       clearTapHistory();
       return;
     }
@@ -207,7 +214,11 @@ export function initOneFingerZoom(map) {
     return (e) => {
       try {
         handler(e);
-      } catch {
+      } catch (err) {
+        // Recover quietly, but not silently: a mis-firing recogniser is otherwise
+        // invisible in the field, and a path that runs on every touch can't surface
+        // itself any louder than this.
+        console.warn("one-finger zoom aborted", err);
         try {
           settle(false);
         } catch {
@@ -219,13 +230,11 @@ export function initOneFingerZoom(map) {
     };
   }
 
-  // The move listener is attached only for an armed sequence, so it costs nothing
-  // for ordinary panning; the other three stay on and do near-nothing until a
-  // double-tap shows up.
+  // The move listener — the expensive one to leave lying around — is attached only
+  // for an armed sequence and detached by endSequence() on every exit; the other three
+  // stay on and do near-nothing until a double-tap shows up.
   const guardedMove = guard(onTouchMove);
-  document.addEventListener("touchstart", guard(onTouchStart), LISTEN);
+  document.addEventListener("touchstart", guard(onTouchStart), LISTEN_PASSIVE);
   document.addEventListener("touchend", guard(onTouchEnd), LISTEN);
   document.addEventListener("touchcancel", guard(onTouchCancel), LISTEN);
-
-  return { isZooming: () => zoom !== null };
 }

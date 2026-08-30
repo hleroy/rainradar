@@ -1047,6 +1047,58 @@ def test_one_finger_zoom_points_at_the_upstream_issue():
     assert "github.com/Leaflet/Leaflet/issues/10303" in todo
 
 
+def test_one_finger_zoom_keeps_touchstart_passive():
+    """Only the listeners that can call preventDefault() may be non-passive.
+
+    `touchstart` never prevents anything, and it is the one listener that stays on the
+    document for the life of the page. Registering it non-passive opts the *whole page*
+    out of the browser's scroll-start optimisation — every scroll, not just the ones
+    over the map — so it gets its own options object.
+    """
+    js = _read("js", "onefingerzoom.js")
+    assert "const LISTEN = { capture: true, passive: false };" in js
+    assert "const LISTEN_PASSIVE = { capture: true, passive: true };" in js
+    assert 'addEventListener("touchstart", guard(onTouchStart), LISTEN_PASSIVE)' in js
+    # move/end/cancel keep LISTEN: the first two call preventDefault() once engaged,
+    # and the move listener's capture flag is what removeEventListener matches on.
+    assert 'addEventListener("touchmove", guardedMove, LISTEN)' in js
+    assert 'addEventListener("touchend", guard(onTouchEnd), LISTEN)' in js
+    assert 'addEventListener("touchcancel", guard(onTouchCancel), LISTEN)' in js
+
+
+def test_one_finger_zoom_tears_down_every_armed_sequence():
+    """Every exit from an armed sequence goes through endSequence().
+
+    endSequence() is the only caller of removeEventListener("touchmove", ...), so an
+    early return that merely forgets the sequence (`seq = null`) strands a non-passive
+    capture listener on the document. Reachable by arming a double-tap, holding still,
+    then landing a second finger — the hand-off branch and both early returns.
+    """
+    js = _read("js", "onefingerzoom.js")
+    start = js[js.index("function onTouchStart(") : js.index("function onTouchMove(")]
+    # The statement form, not the prose: the code comment there names it too.
+    assert "seq = null;" not in start, "onTouchStart must tear down via endSequence()"
+    assert start.count("endSequence();") == 3
+
+
+def test_one_finger_zoom_reports_its_own_aborts():
+    """The guard recovers silently; it must not also *fail* silently.
+
+    A recogniser that mis-fires in the field is otherwise invisible — the abort path
+    leaves the map perfectly usable, so nothing else would ever surface it.
+    """
+    js = _read("js", "onefingerzoom.js")
+    guarded = js[js.index("function guard(") :]
+    assert "catch (err) {" in guarded
+    assert 'console.warn("one-finger zoom aborted", err);' in guarded
+
+
+def test_one_finger_zoom_exposes_no_unused_api():
+    """It is wired for its side effect alone — no caller reads a handle back."""
+    assert "isZooming" not in _read("js", "onefingerzoom.js")
+    assert "isZooming" not in _read("js", "main.js")
+
+
 def test_sw_shell_includes_one_finger_zoom():
     sw = _read("sw.js")
     assert '"/static/js/onefingerzoom.js"' in sw
