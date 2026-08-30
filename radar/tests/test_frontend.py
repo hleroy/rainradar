@@ -114,6 +114,48 @@ def test_radar_and_lightning_expose_export_accessors():
     assert "getExportLayer" in _read("js", "lightning.js")
 
 
+def test_lightning_canvas_rides_the_zoom_animation():
+    """The strike canvas must scale with the map mid-zoom, like the tile layers.
+
+    Leaflet CSS-transforms every layer that opts in, over the two events that cover
+    both gestures: `zoomanim` (the 250 ms wheel/double-click animation) and `zoom`
+    (a pinch, which never animates). A layer wired only to `zoomend` — as this one
+    once was — freezes for the whole gesture while OSM and the radar tiles scale,
+    then jumps into place at the end.
+    """
+    js = _read("js", "lightning.js")
+    assert 'map.on("zoomanim", this._onAnimZoom, this)' in js
+    assert 'map.on("zoom", this._onZoom, this)' in js
+    # transform-origin: 0 0, without which the scale is anchored at the centre.
+    assert '"leaflet-zoom-animated"' in js
+    assert "L.DomUtil.setTransform(this._canvas, offset, scale)" in js
+    # Both handlers must come off with the layer.
+    assert 'map.off("zoomanim", this._onAnimZoom, this)' in js
+    assert 'map.off("zoom", this._onZoom, this)' in js
+    # The transform is sized against the view the pixels were drawn for, never the
+    # map's live zoom — which has already moved on by the time these fire.
+    assert "map.getZoomScale(zoom, this._drawZoom)" in js
+    assert "map._latLngToNewLayerPoint(this._drawTopLeft, zoom, center)" in js
+
+
+def test_lightning_repaint_reasserts_the_zoom_transform():
+    """Every repaint must re-apply the transform, not just refresh the draw-state.
+
+    `_render` moves `_drawZoom`/`_drawTopLeft` to the current view, but the element
+    still wears the transform sized for the *previous* one, and only a `zoom` event
+    re-applies it. A pinch held still fires no such event, so a live strike arriving
+    then would repaint the whole slice under a stale scale until the fingers moved
+    again. The re-assert has to follow the draw-state update — ordered, not merely
+    present — because that is what makes it a scale-1 no-op outside a zoom.
+    """
+    js = _read("js", "lightning.js")
+    assert re.search(
+        r"_drawTopLeft = this\._map\.containerPointToLatLng\(\[0, 0\]\);"
+        r"(?:\s*//[^\n]*\n)*\s*this\._updateTransform\(",
+        js,
+    )
+
+
 # -- installable PWA + offline app shell -------------------------------------
 
 

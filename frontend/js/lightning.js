@@ -33,6 +33,15 @@ const STYLE = {
 // A canvas pinned to the map's overlay pane. Dots stay glued during a pan because
 // the canvas rides the pane's translate; we redraw on move/zoom end, on a cursor
 // change, and on a new live strike.
+//
+// Zooming needs more than that end-of-gesture redraw: while it is in flight the
+// canvas holds pixels drawn for the *old* view, so it has to be scaled to match,
+// exactly as the OSM and radar tile layers are. Leaflet drives that through two
+// events, and a layer must handle both — `zoomanim` (once, at the start of the
+// 250 ms wheel/double-click animation) and `zoom` (continuously through a pinch,
+// which never animates). Both are answered the way L.Renderer answers them: a CSS
+// transform, sized against the view the pixels were drawn for, cleared on `zoomend`
+// when `_reset` re-projects them for real.
 function makeCanvasLayer(L) {
   return L.Layer.extend({
     onAdd(map) {
@@ -41,10 +50,22 @@ function makeCanvasLayer(L) {
       this._canvas = canvas;
       map.getPanes().overlayPane.appendChild(canvas);
       map.on("moveend zoomend resize viewreset", this._reset, this);
+      map.on("zoom", this._onZoom, this);
+      // `_zoomAnimated` is set by Leaflet's Layer._layerAdd, before onAdd runs. It is
+      // false when the map or the browser can't animate a zoom, and then `_animateZoom`
+      // never runs — which is the only thing that fires `zoomanim` or puts
+      // `leaflet-zoom-anim` on the map pane (the transition in leaflet.css hangs off
+      // that class, not off ours). Both the handler and the class would be dead weight.
+      if (this._zoomAnimated) {
+        L.DomUtil.addClass(canvas, "leaflet-zoom-animated"); // transform-origin: 0 0
+        map.on("zoomanim", this._onAnimZoom, this);
+      }
       this._reset();
     },
     onRemove(map) {
       map.off("moveend zoomend resize viewreset", this._reset, this);
+      map.off("zoom", this._onZoom, this);
+      if (this._zoomAnimated) map.off("zoomanim", this._onAnimZoom, this);
       L.DomUtil.remove(this._canvas);
       this._canvas = null;
     },
@@ -52,20 +73,51 @@ function makeCanvasLayer(L) {
       this._drawFn = fn;
     },
     redraw() {
-      if (this._canvas) this._render();
+      // Mid-animation the map already reports the *target* projection, so a strike
+      // drawn now would land at target coordinates on a canvas still showing the old
+      // view under a transform. Skip it: `zoomend` re-projects the whole slice anyway.
+      if (this._canvas && !this._map._animatingZoom) this._render();
     },
     _reset() {
       if (!this._canvas) return;
       const size = this._map.getSize();
       this._canvas.width = size.x;
       this._canvas.height = size.y;
+      // Translate-only — this is also what clears a leftover zoom-animation scale.
       L.DomUtil.setPosition(this._canvas, this._map.containerPointToLayerPoint([0, 0]));
       this._render();
+    },
+    // Scale/shift the already-drawn pixels into the view being zoomed to. Anchored on
+    // the state `_render` last drew for, not on the map's current zoom: by the time
+    // these fire the map has already moved on (`zoomanim` runs before the commit but
+    // a pinch commits every frame), and only the draw-time state matches the pixels.
+    _updateTransform(center, zoom) {
+      if (!this._canvas || this._drawZoom == null) return;
+      const map = this._map;
+      const scale = map.getZoomScale(zoom, this._drawZoom);
+      const offset = map._latLngToNewLayerPoint(this._drawTopLeft, zoom, center);
+      L.DomUtil.setTransform(this._canvas, offset, scale);
+    },
+    _onAnimZoom(e) {
+      this._updateTransform(e.center, e.zoom);
+    },
+    _onZoom() {
+      this._updateTransform(this._map.getCenter(), this._map.getZoom());
     },
     _render() {
       const ctx = this._canvas.getContext("2d");
       ctx.clearRect(0, 0, this._canvas.width, this._canvas.height);
       if (this._drawFn) this._drawFn(ctx, this._map);
+      // The view these pixels are valid for: canvas top-left is container [0, 0].
+      this._drawZoom = this._map.getZoom();
+      this._drawTopLeft = this._map.containerPointToLatLng([0, 0]);
+      // The element still wears the transform sized for the *previous* draw-state, and
+      // nothing re-applies it until the next `zoom` fires — which never comes while a
+      // pinch is held still. A live strike landing in that window would repaint the
+      // whole slice under a stale scale. Re-assert it here: with the draw-state just
+      // refreshed this is scale 1 at the current top-left, i.e. exactly what `_reset`'s
+      // setPosition writes, so it is a no-op whenever no zoom is in flight.
+      this._updateTransform(this._map.getCenter(), this._map.getZoom());
     },
   });
 }
