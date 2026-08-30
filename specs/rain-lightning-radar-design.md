@@ -594,6 +594,13 @@ is slaved to the radar cursor: the frame at time *T* shows exactly the strikes i
 slice `(previous frame, T]`. Scrubbing or playing animates rain and lightning in
 lockstep. Strikes are drawn on a Canvas overlay that never intercepts map interactions.
 
+That overlay is a hand-rolled `L.Layer`, so it has to opt into Leaflet's zoom
+contract explicitly or it desynchronises from the tiles: it CSS-transforms the canvas
+on **both** `zoomanim` (the animated wheel/double-click zoom) and `zoom` (a pinch,
+which never animates), sized against the view its pixels were drawn for, then
+re-projects them for real on `zoomend`. Handling only the end of the gesture leaves
+the strikes frozen while OSM and the radar scale, and jumping into place at the end.
+
 ---
 
 ## 9. Storm alerts
