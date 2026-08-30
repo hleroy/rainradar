@@ -52,8 +52,10 @@ function makeCanvasLayer(L) {
       map.on("moveend zoomend resize viewreset", this._reset, this);
       map.on("zoom", this._onZoom, this);
       // `_zoomAnimated` is set by Leaflet's Layer._layerAdd, before onAdd runs. It is
-      // false when the map or the browser can't animate a zoom; there is then no
-      // `zoomanim`, and the class would only put a transition on our own `_reset`.
+      // false when the map or the browser can't animate a zoom, and then `_animateZoom`
+      // never runs — which is the only thing that fires `zoomanim` or puts
+      // `leaflet-zoom-anim` on the map pane (the transition in leaflet.css hangs off
+      // that class, not off ours). Both the handler and the class would be dead weight.
       if (this._zoomAnimated) {
         L.DomUtil.addClass(canvas, "leaflet-zoom-animated"); // transform-origin: 0 0
         map.on("zoomanim", this._onAnimZoom, this);
@@ -109,6 +111,13 @@ function makeCanvasLayer(L) {
       // The view these pixels are valid for: canvas top-left is container [0, 0].
       this._drawZoom = this._map.getZoom();
       this._drawTopLeft = this._map.containerPointToLatLng([0, 0]);
+      // The element still wears the transform sized for the *previous* draw-state, and
+      // nothing re-applies it until the next `zoom` fires — which never comes while a
+      // pinch is held still. A live strike landing in that window would repaint the
+      // whole slice under a stale scale. Re-assert it here: with the draw-state just
+      // refreshed this is scale 1 at the current top-left, i.e. exactly what `_reset`'s
+      // setPosition writes, so it is a no-op whenever no zoom is in flight.
+      this._updateTransform(this._map.getCenter(), this._map.getZoom());
     },
   });
 }

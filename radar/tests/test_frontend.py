@@ -138,6 +138,24 @@ def test_lightning_canvas_rides_the_zoom_animation():
     assert "map._latLngToNewLayerPoint(this._drawTopLeft, zoom, center)" in js
 
 
+def test_lightning_repaint_reasserts_the_zoom_transform():
+    """Every repaint must re-apply the transform, not just refresh the draw-state.
+
+    `_render` moves `_drawZoom`/`_drawTopLeft` to the current view, but the element
+    still wears the transform sized for the *previous* one, and only a `zoom` event
+    re-applies it. A pinch held still fires no such event, so a live strike arriving
+    then would repaint the whole slice under a stale scale until the fingers moved
+    again. The re-assert has to follow the draw-state update — ordered, not merely
+    present — because that is what makes it a scale-1 no-op outside a zoom.
+    """
+    js = _read("js", "lightning.js")
+    assert re.search(
+        r"_drawTopLeft = this\._map\.containerPointToLatLng\(\[0, 0\]\);"
+        r"(?:\s*//[^\n]*\n)*\s*this\._updateTransform\(",
+        js,
+    )
+
+
 # -- installable PWA + offline app shell -------------------------------------
 
 

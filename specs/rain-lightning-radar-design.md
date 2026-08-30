@@ -601,6 +601,12 @@ which never animates), sized against the view its pixels were drawn for, then
 re-projects them for real on `zoomend`. Handling only the end of the gesture leaves
 the strikes frozen while OSM and the radar scale, and jumping into place at the end.
 
+The transform and the pixels are one unit, so *every* repaint re-asserts it: a live
+strike can land mid-gesture, and a pinch held still fires no further `zoom` to correct
+the transform the previous draw-state left behind. Because the re-assert runs after the
+draw-state is refreshed, it collapses to scale 1 at the current top-left — identical to
+the translate `_reset` writes — whenever no zoom is in flight.
+
 ---
 
 ## 9. Storm alerts
