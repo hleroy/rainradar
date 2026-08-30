@@ -41,6 +41,7 @@ application sur votre téléphone.
 - 🕰️ **Archive de 90 jours** — revenez à n'importe quelle date et heure passée avec le sélecteur.
 - 🎬 **Export vidéo** — générez un court clip MP4 de la situation et partagez-le (WhatsApp, Signal…).
 - 🔔 **Alertes orage** — soyez notifié quand la foudre frappe à moins de 30 ou 10 km d'un point de votre choix, **même application fermée** (notifications push, sur les navigateurs et appareils compatibles — sur iPhone/iPad, installez d'abord l'app). À titre informatif, ce n'est pas une alerte de sécurité.
+- 👆 **Zoom à une main** — double-tapez puis, sans relever le doigt, glissez vers le bas pour zoomer, vers le haut pour dézoomer (comme sur Google Maps).
 - 📲 **Installable (PWA)** — ajoutez-la à votre écran d'accueil ; elle se lance comme une app et démarre même hors-ligne.
 - 🔒 **Sans pub, sans pistage** — aucune publicité, aucun tracker, aucun compte.
 - 🌍 **Bilingue** — interface en français et en anglais.

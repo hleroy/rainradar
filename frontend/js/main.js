@@ -9,6 +9,7 @@ import { initClip } from "./clip.js";
 import { initAlerts } from "./alerts.js";
 import { initDateSheet } from "./datesheet.js";
 import { initSettings } from "./settings.js";
+import { initOneFingerZoom } from "./onefingerzoom.js";
 
 const OSM_URL = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
 const OSM_ATTR =
@@ -48,6 +49,11 @@ async function main() {
   // them back off a canvas; the capture reuses the same HTTP-cache entries (no extra
   // OSM requests), respecting OSM's tile policy.
   L.tileLayer(OSM_URL, { attribution: OSM_ATTR, maxZoom: 19, crossOrigin: "anonymous" }).addTo(map);
+
+  // One-finger zoom shortcut (double-tap, hold, slide). Additive and touch-only:
+  // it recognises the gesture ahead of Leaflet's own handlers and stands aside for
+  // everything else, so pan, pinch and plain double-tap zoom are unchanged.
+  initOneFingerZoom(map);
 
   // The active provider's mandatory credit (HTML w/ link) comes from the
   // backend and is fed verbatim into Leaflet's attribution control. The

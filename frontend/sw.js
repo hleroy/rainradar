@@ -36,6 +36,7 @@ const STATIC_SHELL = [
   "/static/js/alerts.js",
   "/static/js/datesheet.js",
   "/static/js/settings.js",
+  "/static/js/onefingerzoom.js",
   "/static/vendor/leaflet.js",
   "/static/vendor/leaflet.css",
   "/static/vendor/mediabunny/mediabunny.js",

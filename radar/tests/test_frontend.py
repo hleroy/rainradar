@@ -961,3 +961,67 @@ def test_radar_js_survives_a_network_level_fetch_rejection():
 def test_sw_cache_version_bumped_for_anchored_refresh():
     sw = _read("sw.js")
     assert 'CACHE_VERSION = "v21"' not in sw  # shell changed (radar.js)
+
+
+# -- one-finger zoom shortcut (double-tap, hold, slide) -----------------------
+
+
+def test_one_finger_zoom_module_exists_and_is_wired_into_main():
+    main = _read("js", "main.js")
+    assert 'from "./onefingerzoom.js"' in main
+    assert "initOneFingerZoom(map);" in main
+    assert "export function initOneFingerZoom(" in _read("js", "onefingerzoom.js")
+
+
+def test_one_finger_zoom_is_touch_only_and_additive():
+    """The shortcut may only ever *add* a gesture.
+
+    It listens for touch events and nothing else — no mouse, wheel or key path —
+    and it never disables one of Leaflet's own handlers, which is what would make
+    pan/pinch/double-tap-zoom regress when the recogniser mis-fires.
+    """
+    js = _read("js", "onefingerzoom.js")
+    listened = set(re.findall(r'add(?:Event)?Listener\("(\w+)"', js))
+    assert listened == {"touchstart", "touchmove", "touchend", "touchcancel"}, listened
+    assert ".disable()" not in js, "the shortcut must not switch off a Leaflet handler"
+
+
+def test_one_finger_zoom_never_prevents_the_second_tap():
+    """preventDefault() on the armed touchstart would kill the plain double-tap zoom.
+
+    Recognition happens on the *second* tap's touchstart, before it is known
+    whether the finger will slide or simply lift. Only stopPropagation() is safe
+    there: an unprevented tap still synthesises the click/dblclick pair Leaflet's
+    doubleClickZoom needs. preventDefault() belongs on the move/end of an engaged
+    gesture, where it also suppresses the dblclick that would double the zoom.
+    """
+    js = _read("js", "onefingerzoom.js")
+    armed = js[js.index("function onTouchStart(") : js.index("function onTouchMove(")]
+    assert "e.stopPropagation();" in armed
+    assert "e.preventDefault();" not in armed
+    engaged = js[js.index("function onTouchMove(") : js.index("function onTouchCancel(")]
+    assert engaged.count("e.preventDefault();") == 2  # the engaged move, and the end
+
+
+def test_one_finger_zoom_pivots_on_the_tapped_point():
+    """The zoom is anchored to the double-tapped point, not to the map center."""
+    js = _read("js", "onefingerzoom.js")
+    assert "map.unproject(map.project(zoom.anchor, z).subtract(zoom.offset), z)" in js
+    # Fractional zoom per frame, then one snapped landing — Leaflet's own pinch idiom.
+    assert "map._move(zoom.center, zoom.level, { pinch: true, round: false }, undefined);" in js
+    assert "map._limitZoom(zoom.level)" in js
+    # And it stays inside the map's configured zoom range.
+    assert "Math.max(map.getMinZoom(), Math.min(map.getMaxZoom()," in js
+
+
+def test_one_finger_zoom_direction_is_named():
+    """Slide down = zoom in (the Google Maps mapping), behind a single named flag."""
+    js = _read("js", "onefingerzoom.js")
+    assert "const DOWN_IS_ZOOM_IN = true;" in js
+    assert "(DOWN_IS_ZOOM_IN ? dy : -dy) / PX_PER_ZOOM_LEVEL" in js
+
+
+def test_sw_shell_includes_one_finger_zoom():
+    sw = _read("sw.js")
+    assert '"/static/js/onefingerzoom.js"' in sw
+    assert 'CACHE_VERSION = "v23"' not in sw  # shell changed (new module + main.js)
