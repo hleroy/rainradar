@@ -1043,6 +1043,20 @@ design is defensive on both sides of that recognition:
   while Leaflet is playing a zoom animation — the same precaution Leaflet's own pinch
   handler takes.
 
+**Upstream.** Core wants this too — [Leaflet #10303](https://github.com/Leaflet/Leaflet/issues/10303)
+requests the identical gesture and the identical direction mapping, but it is open,
+untriaged and unclaimed (no PR, no milestone) as of 2026-08, which is why the field is
+still plugin territory. The two published plugins were read closely before this was
+written and neither is vendored: `cherniavskii/Leaflet.DoubleTapDragZoom` engages on a
+100 ms hold rather than on movement, pivots on a drifting midpoint and does not clamp
+during the drag; `petoc/Leaflet.DoubleTouchDragZoom` arms on any two taps within 300 ms
+regardless of their duration or distance apart, and carries the `zoomend` re-enable trap
+described above. Their zoom maths agree with ours to within a few pixels per level (138
+and 144 px against our 150), and `_stop()` plus the `_animatingZoom` bail were taken
+from them. **Recheck #10303 whenever the vendored Leaflet is bumped** — if it lands in
+core, this module goes and the core option replaces it (there is a matching note at the
+top of `onefingerzoom.js`).
+
 The zoom itself mirrors Leaflet's own pinch handler: fractional `_move()` per animation
 frame while the finger is down, one snapped `_animateZoom()` on release. It pivots on
 the double-tapped point (a fixed anchor, unlike pinch's moving midpoint), so the feature

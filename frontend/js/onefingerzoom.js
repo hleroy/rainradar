@@ -11,6 +11,15 @@
 // Leaflet 1.9 has no such handler, so this is modelled on its own pinch handler
 // (`TouchZoom`): fractional `_move()` per frame while the finger is down, then one
 // snapped `_animateZoom()` on release.
+//
+// UPSTREAM — recheck when bumping the vendored Leaflet:
+// https://github.com/Leaflet/Leaflet/issues/10303 asks for exactly this gesture in
+// core, with the same mapping (down = in, up = out). Open, labelled feature +
+// needs-triage, no PR and no milestone as of 2026-08. If it ever lands, drop this
+// module and turn on the core option instead. (Until then the field is plugin
+// territory: cherniavskii/Leaflet.DoubleTapDragZoom and
+// petoc/Leaflet.DoubleTouchDragZoom — see design doc §13.8 for why neither is
+// vendored here.)
 
 const DOUBLE_TAP_MS = 300; // max gap between the first tap's lift and the second's touch
 const TAP_MAX_MS = 400; // a tap is short (but not a long-press)…

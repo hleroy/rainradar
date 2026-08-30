@@ -1034,6 +1034,19 @@ def test_one_finger_zoom_yields_to_leaflets_own_animations():
     assert "!map._animatingZoom &&" in js
 
 
+def test_one_finger_zoom_points_at_the_upstream_issue():
+    """The module exists only until Leaflet ships the gesture itself.
+
+    Leaflet #10303 asks for exactly this gesture in core. The pointer has to
+    survive in the source, because the trigger to check it — bumping the vendored
+    Leaflet — happens nowhere near this file. TODO.md carries the dated half.
+    """
+    js = _read("js", "onefingerzoom.js")
+    assert "github.com/Leaflet/Leaflet/issues/10303" in js
+    todo = FRONTEND.parent.joinpath("TODO.md").read_text(encoding="utf-8")
+    assert "github.com/Leaflet/Leaflet/issues/10303" in todo
+
+
 def test_sw_shell_includes_one_finger_zoom():
     sw = _read("sw.js")
     assert '"/static/js/onefingerzoom.js"' in sw
