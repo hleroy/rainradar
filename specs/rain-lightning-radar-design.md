@@ -1074,6 +1074,29 @@ under the finger stays under the finger, and it clamps to the map's own zoom ran
 Vertical travel is the only input — 150 px per zoom level — and the direction sits
 behind a single named constant.
 
+### 13.9 Leaflet's zoom contract
+
+Anything we position ourselves in **layer points** — the lightning canvas (§8.4) and the
+radar pane's bbox clip mask — has to be re-projected across a zoom, not just after one.
+Leaflet gives its own layers three signals and we must answer the right ones:
+
+- **`zoom`** fires continuously through a pinch, which never animates. The map's live
+  state is already correct when it fires, so it can be read directly.
+- **`zoomanim`** fires once at the start of the 250 ms wheel/double-click animation —
+  and *before* `_animateZoom` commits the new projection, so the map's live state is
+  still the old one. The event's own `center`/`zoom` are the only correct source, via
+  `map._latLngToNewLayerPoint(ll, zoom, center)`.
+- **`zoomend`** is the end of the gesture, far too late to be the only handler: for the
+  whole animation the tiles scale while anything wired only to `zoomend` sits frozen,
+  then jumps into place.
+
+The animation itself is CSS, so the answer has to be too: an element gets a transform,
+a `clip-path` gets a transition, both on Leaflet's own `0.25s cubic-bezier(0,0,0.25,1)`
+(see `vendor/leaflet.css`). Those transitions are **not** motion-gated anywhere,
+because they track an animation Leaflet plays unconditionally — gating them would
+reintroduce the desync rather than remove motion. Both members of this list once had
+the bug and both fixes are pinned by tests; a third such element should be added here.
+
 ---
 
 ## 14. Configuration and feature flags
