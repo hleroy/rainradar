@@ -38,12 +38,12 @@ dependencies = [
   "uvicorn-worker==0.4.0",
   # WebSocket client for the Blitzortung lightning ingester. httpx cannot
   # do WebSockets, hence the dedicated dep.
-  "websockets==17.0.1",
+  "websockets==17.1",
 ]
 
 [dependency-groups]
 dev = [
-  "coverage==7.15.4",
+  "coverage==7.16.0",
   "pre-commit==4.6.2",
   "pytest>=9.1.1,<10",
   "pytest-asyncio>=0.24",
