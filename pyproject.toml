@@ -28,22 +28,22 @@ dependencies = [
   "httpx==0.28.1",
   "numpy==2.5.2",
   "pillow==12.3.0",
-  "psycopg[c]==3.3.4",
+  "psycopg[c]==3.3.5",
   "pyproj==3.7.2",
   # Web Push sender for background storm alerts. Synchronous (requests-based);
   # the evaluator wraps every send in asyncio.to_thread. Pulls py-vapid + cryptography.
-  "pywebpush==2.4.0",
+  "pywebpush==2.5.0",
   "redis==8.1.0",
   "uvicorn[standard]==0.52.4",
   "uvicorn-worker==0.4.0",
   # WebSocket client for the Blitzortung lightning ingester. httpx cannot
   # do WebSockets, hence the dedicated dep.
-  "websockets==17.0.1",
+  "websockets==17.1",
 ]
 
 [dependency-groups]
 dev = [
-  "coverage==7.15.4",
+  "coverage==7.16.0",
   "pre-commit==4.6.2",
   "pytest>=9.1.1,<10",
   "pytest-asyncio>=0.24",
