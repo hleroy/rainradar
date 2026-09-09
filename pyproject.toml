@@ -16,7 +16,7 @@ classifiers = [
 ]
 dependencies = [
   "apscheduler==3.11.3",
-  "django==6.1",
+  "django==6.1.1",
   "django-environ==0.14.0",
   "django-redis==7.0.0",
   "gunicorn==26.2.0",
@@ -29,7 +29,7 @@ dependencies = [
   "numpy==2.5.2",
   "pillow==12.3.0",
   "psycopg[c]==3.3.5",
-  "pyproj==3.7.2",
+  "pyproj==3.8.0",
   # Web Push sender for background storm alerts. Synchronous (requests-based);
   # the evaluator wraps every send in asyncio.to_thread. Pulls py-vapid + cryptography.
   "pywebpush==2.5.0",
