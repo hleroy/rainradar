@@ -24,11 +24,11 @@ dependencies = [
   # reprojection, PNG encode. manylinux wheels only — no GDAL, no host build
   # (all four ship cp314 manylinux wheels, verified by a build spike).
   "h5py==3.16.0",
-  "hiredis==3.4.1",
+  "hiredis==3.4.2",
   "httpx==0.28.1",
   "numpy==2.5.3",
   "pillow==12.3.0",
-  "psycopg[c]==3.3.5",
+  "psycopg[c]==3.3.6",
   "pyproj==3.8.0",
   # Web Push sender for background storm alerts. Synchronous (requests-based);
   # the evaluator wraps every send in asyncio.to_thread. Pulls py-vapid + cryptography.
