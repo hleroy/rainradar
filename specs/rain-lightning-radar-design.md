@@ -724,7 +724,11 @@ Notes:
   safety net and is never dropped.
 - **All time integrity is UTC**: `USE_TZ = True`, every datetime column is `timestamptz`,
   containers run UTC, and both upstreams report UTC so there is no conversion at ingest.
-  Django's display `TIME_ZONE` is irrelevant to any of it.
+  Django's display `TIME_ZONE` is irrelevant to any of it. The one local-time surface is
+  the browser: every label renders in the viewer's zone, so the date sheet picks a
+  **local** calendar day (local midnight → next local midnight, 23 h / 25 h across DST;
+  `frontend/js/localtime.js`) and sends it as an epoch `from`/`to`. The API, the archive
+  and the tiles' UTC date folder never see a local date.
 
 Migrations must be **backward-compatible (expand/contract)** — they run against the live
 database before old containers are swapped out.

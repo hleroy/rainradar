@@ -1524,17 +1524,11 @@ body {
   max-width: min(23rem, 92vw);
 }
 
-#datesheet-hint {
-  margin: 0 0 0.75rem;
-  font-size: 0.8rem;
-  color: #5c636a;
-}
-
 #datesheet-quick {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
-  margin-bottom: 0.75rem;
+  margin: 0.75rem 0; /* collapses with the title's 0.5rem → the sheet's 0.75rem rhythm */
 }
 
 .datesheet-quick-btn {

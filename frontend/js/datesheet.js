@@ -6,12 +6,13 @@
 // « » buttons. Like the About dialog, it's an in-page modal built from the same
 // .modal-panel chrome; it only ever calls radar.enterArchive/enterLive, never
 // an upstream provider directly.
+//
+// Every date and time here is the viewer's LOCAL wall clock — the same one the
+// transport bar and scrubber labels display — so a picked day spans local
+// midnight to local midnight (see localtime.js). Only the archive storage is UTC.
 
-const DAY_S = 86400;
-const WEEKDAY_REF_MS = Date.UTC(2024, 0, 1); // a known Monday, for locale weekday labels
+import { localDateStr, localTimeStr, shiftLocalDays } from "./localtime.js";
 
-const utcDateStr = (epochSeconds) => new Date(epochSeconds * 1000).toISOString().slice(0, 10);
-const utcTimeStr = (epochSeconds) => new Date(epochSeconds * 1000).toISOString().slice(11, 16);
 const pad2 = (n) => String(n).padStart(2, "0");
 const monthKey = (dateStr) => dateStr.slice(0, 7); // "YYYY-MM"
 
@@ -47,8 +48,8 @@ export function initDateSheet({ currentLocale, radar }) {
       if (!resp.ok) return;
       const { earliest, latest } = await resp.json();
       bounds = {
-        min: earliest == null ? null : utcDateStr(earliest),
-        max: latest == null ? null : utcDateStr(latest),
+        min: earliest == null ? null : localDateStr(earliest),
+        max: latest == null ? null : localDateStr(latest),
       };
       if (isOpen) renderMonth(); // reflect freshly loaded bounds if the sheet is up
     } catch {
@@ -80,30 +81,32 @@ export function initDateSheet({ currentLocale, radar }) {
     close();
   }
 
-  // Shared by the « »  step buttons and the -30d/-7d/-1d/+1d chips: an exact
-  // +/-24h-multiple jump from the reference point. Stepping past "now" enters
-  // LIVE instead of an empty future archive query.
+  // Shared by the « »  step buttons and the -30d/-7d/-1d/+1d chips: a jump of
+  // whole local calendar days from the reference point, keeping the wall-clock
+  // time across a DST change. Stepping past "now" enters LIVE instead of an
+  // empty future archive query.
   function jumpByDays(deltaDays) {
-    const target = referenceTs() + deltaDays * DAY_S;
+    const target = shiftLocalDays(referenceTs(), deltaDays);
     if (target > Math.floor(Date.now() / 1000)) {
       radar.enterLive();
       close();
       return;
     }
-    performJump(utcDateStr(target), utcTimeStr(target));
+    performJump(localDateStr(target), localTimeStr(target));
   }
 
   // -- calendar grid ------------------------------------------------------
 
   function monthLabel(year, month) {
     return new Intl.DateTimeFormat(currentLocale(), { month: "long", year: "numeric" }).format(
-      new Date(Date.UTC(year, month, 1)),
+      new Date(year, month, 1),
     );
   }
 
   function weekdayLabels() {
     const fmt = new Intl.DateTimeFormat(currentLocale(), { weekday: "short" });
-    return [0, 1, 2, 3, 4, 5, 6].map((i) => fmt.format(new Date(WEEKDAY_REF_MS + i * DAY_S * 1000)));
+    // 1 Jan 2024 is a Monday; local dates so the formatter can't slip a day.
+    return [0, 1, 2, 3, 4, 5, 6].map((i) => fmt.format(new Date(2024, 0, 1 + i)));
   }
 
   function renderWeekdays() {
@@ -115,15 +118,15 @@ export function initDateSheet({ currentLocale, radar }) {
     }
   }
 
-  // Monday-first grid, all in UTC (matches the archive's UTC day boundaries).
+  // Monday-first grid of local calendar days (matches the local-day archive window).
   function renderMonth() {
     calMonthEl.textContent = monthLabel(viewYear, viewMonth);
     calGridEl.replaceChildren();
 
-    const first = new Date(Date.UTC(viewYear, viewMonth, 1));
-    const daysInMonth = new Date(Date.UTC(viewYear, viewMonth + 1, 0)).getUTCDate();
-    const leading = (first.getUTCDay() + 6) % 7; // Mon=0 .. Sun=6
-    const today = utcDateStr(Math.floor(Date.now() / 1000));
+    const first = new Date(viewYear, viewMonth, 1);
+    const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+    const leading = (first.getDay() + 6) % 7; // Mon=0 .. Sun=6
+    const today = localDateStr(Math.floor(Date.now() / 1000));
 
     for (let i = 0; i < leading; i += 1) {
       calGridEl.appendChild(document.createElement("span"));
@@ -199,8 +202,8 @@ export function initDateSheet({ currentLocale, radar }) {
     if (isOpen) return;
     isOpen = true;
     const ref = referenceTs();
-    selectedDate = utcDateStr(ref);
-    timeInput.value = utcTimeStr(ref);
+    selectedDate = localDateStr(ref);
+    timeInput.value = localTimeStr(ref);
     viewYear = Number(selectedDate.slice(0, 4));
     viewMonth = Number(selectedDate.slice(5, 7)) - 1;
     renderWeekdays();
@@ -239,7 +242,7 @@ export function initDateSheet({ currentLocale, radar }) {
     if (btn) jumpByDays(Number(btn.dataset.offsetDays));
   });
   goBtn.addEventListener("click", () => {
-    performJump(selectedDate || utcDateStr(referenceTs()), timeInput.value);
+    performJump(selectedDate || localDateStr(referenceTs()), timeInput.value);
   });
 
   loadBounds();

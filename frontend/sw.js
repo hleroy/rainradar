@@ -13,7 +13,7 @@
 //     on `controllerchange` (main.js), never on first install, and deferred while a
 //     video export is mid-render.
 
-const CACHE_VERSION = "v26"; // bump on every release that changes shell assets
+const CACHE_VERSION = "v27"; // bump on every release that changes shell assets
 const CACHE_NAME = `rainradar-shell-${CACHE_VERSION}`;
 
 // Explicit (no build manifest exists — vanilla ES modules, no hashing). Every entry
@@ -35,6 +35,7 @@ const STATIC_SHELL = [
   "/static/js/clip.js",
   "/static/js/alerts.js",
   "/static/js/datesheet.js",
+  "/static/js/localtime.js",
   "/static/js/settings.js",
   "/static/js/onefingerzoom.js",
   "/static/vendor/leaflet.js",

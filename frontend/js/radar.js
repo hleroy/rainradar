@@ -2,11 +2,12 @@
 // (/tiles/{provider}/{date}/{ts}/{z}/{x}/{y}.png — Nginx-static in prod, Django
 // fallback), never from RainViewer or Météo-France directly.
 
+import { localDayWindow, localMoment } from "./localtime.js";
+
 const TILE_OPTS = { tileSize: 256, opacity: 0, maxNativeZoom: 7, maxZoom: 12, pane: "radar" };
 const FRAME_MS = 500; // play speed
 const LIVE_OPACITY = 0.8; // default; the settings popover can override (persisted)
 const OPACITY_MIN = 0.2; // a fully invisible radar would read as "broken"
-const DAY_SECONDS = 86400;
 // Fallback cadence before the providers advert loads (RainViewer's 600 s); once it
 // arrives, both the gap tolerance and the refresh anchor follow the active provider's
 // frame_interval — the client hardcodes no frame cadence of its own.
@@ -33,7 +34,8 @@ const BACKOFF_MIN_CEILING_MS = 10 * 60 * 1000; // a view labelled DIRECT may not
 // Wall clock in epoch seconds, to compare against frame timestamps.
 const nowS = () => Math.floor(Date.now() / 1000);
 
-// UTC calendar date of an epoch-seconds ts (matches storage.utc_date).
+// UTC calendar date of an epoch-seconds ts (matches storage.utc_date). Deliberately
+// UTC — it names the on-disk tile folder — unlike the picker's local-day window.
 const utcDate = (ts) => new Date(ts * 1000).toISOString().slice(0, 10);
 
 // Per-browser choice of radar source; validated against the advert.
@@ -656,10 +658,11 @@ export async function initRadar(
     setFollowing(false);
     notifyState(); // propagate the mode switch even before frames load
     pause();
-    const dayStart = Math.floor(Date.parse(`${dateStr}T00:00:00Z`) / 1000);
-    if (Number.isNaN(dayStart)) return;
-    const from = dayStart;
-    const to = dayStart + DAY_SECONDS - 1; // exclusive of next midnight (no double-listing)
+    // The picked day is the viewer's LOCAL calendar day (what every label shows),
+    // local midnight to next local midnight — 23 h / 25 h across a DST change.
+    const day = localDayWindow(dateStr);
+    if (!day) return;
+    const { from, to } = day;
     archiveDate = dateStr; // remember the window so a provider switch can re-query it
     archiveTime = timeStr || null;
     const res = await fetchFrames({ from, to });
@@ -674,10 +677,10 @@ export async function initRadar(
       return;
     }
     // Position at the frame nearest the picked time-of-day.
-    let target = dayStart;
+    let target = from;
     if (timeStr) {
-      const t2 = Date.parse(`${dateStr}T${timeStr}:00Z`);
-      if (!Number.isNaN(t2)) target = Math.floor(t2 / 1000);
+      const t2 = localMoment(dateStr, timeStr);
+      if (!Number.isNaN(t2)) target = t2;
     }
     let nearest = 0;
     let best = Infinity;

@@ -1129,3 +1129,55 @@ def test_sw_shell_includes_one_finger_zoom():
     # both branches wrote the *identical* line the rebase merged them without a
     # conflict — two different shells would have shared one cache key.
     assert 'CACHE_VERSION = "v24"' not in sw  # shell changed (new module + main.js)
+
+
+# -- archive picker speaks local time -----------------------------------------
+
+
+def test_archive_day_window_is_the_local_calendar_day():
+    """A picked day is local midnight → next local midnight, not the UTC day.
+
+    Every label (scrubber ends, clock, date line) is formatted in the viewer's zone,
+    so a UTC-day window read 02:00 → 01:55 in CEST. Only the epoch window changes:
+    the tile path's date folder stays UTC (storage.utc_date).
+    """
+    radar = _read("js", "radar.js")
+    assert 'import { localDayWindow, localMoment } from "./localtime.js";' in radar
+    assert "T00:00:00Z" not in radar
+    assert ":00Z`" not in radar  # the picked time-of-day is local too
+    assert "const utcDate = (ts) => new Date(ts * 1000).toISOString().slice(0, 10);" in radar
+    assert "/tiles/${provider}/${utcDate(ts)}/" in radar
+
+
+def test_localtime_builds_dates_from_local_parts():
+    """Date.parse reads a date-only ISO string as UTC midnight — the original bug."""
+    js = _read("js", "localtime.js")
+    assert "Date.parse(" not in js
+    assert "getUTC" not in js
+    assert "toISOString" not in js
+    # DST-correct: the day ends at the next local midnight, not start + 86400.
+    assert "new Date(y, m - 1, d + 1)" in js
+    assert "86400" not in js
+    # Day steps keep the wall-clock time across a DST change.
+    assert "d.setDate(d.getDate() + days);" in js
+
+
+def test_datesheet_is_local_time_throughout():
+    datesheet = _read("js", "datesheet.js")
+    assert 'from "./localtime.js";' in datesheet
+    for utc_api in ("toISOString", "getUTC", "Date.UTC", "86400"):
+        assert utc_api not in datesheet, utc_api
+    assert "shiftLocalDays(referenceTs(), deltaDays)" in datesheet
+
+
+def test_datesheet_utc_hint_removed():
+    assert "utc_hint" not in _read("index.html")
+    assert "datesheet-hint" not in _read("css", "app.css")
+    for lang in ("en", "fr"):
+        assert "picker.utc_hint" not in json.loads(_read("i18n", f"{lang}.json"))
+
+
+def test_sw_shell_includes_localtime():
+    sw = _read("sw.js")
+    assert '"/static/js/localtime.js"' in sw
+    assert 'CACHE_VERSION = "v26"' not in sw  # shell changed (new module + picker files)
