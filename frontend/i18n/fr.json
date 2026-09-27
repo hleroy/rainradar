@@ -11,7 +11,6 @@
   "picker.date": "Date",
   "picker.time": "Heure",
   "picker.jump": "Aller",
-  "picker.utc_hint": "Les dates d'archive sont en UTC",
   "datesheet.open": "Aller à une date",
   "datesheet.title": "Aller à une date",
   "datesheet.quick.30d": "-30j",
