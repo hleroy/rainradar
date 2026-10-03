@@ -256,6 +256,11 @@ flags) lives in the `deploy` skill: [`.claude/skills/deploy/SKILL.md`](.claude/s
 Migrations must be **backward-compatible (expand/contract)** — they run against the
 live DB before old containers are swapped.
 
+Every base image (`compose/**/Dockerfile` `FROM`s and the Redis `image:`) is pinned
+as `tag@sha256:<index digest>` so a rebuild can never silently pick up a
+republished — or tampered — tag. Dependabot refreshes the digest after its
+cooldown; never drop the `@sha256` to "unstick" a build.
+
 ## Observability
 
 The app **instruments only** — it emits a Prometheus-text `/metrics` endpoint
