@@ -71,7 +71,7 @@ So, in an environment whose ambient Python is older (Claude Code on the web ship
   `uv python install 3.14`), or check inside the container.
 - **Never** run whatever `ruff` is on `PATH` — a different version invents findings
   (`RUF100` against preview rules it doesn't enable). Use the pin:
-  `uvx $RAINRADAR_RUFF check .` (`ruff@0.16.1`, from `pyproject.toml`).
+  `uvx $RAINRADAR_RUFF check .` (`ruff@0.16.9`, from `pyproject.toml`).
 - Docker is unavailable in a web session, so the suite genuinely cannot run there.
   A clean parse and a clean `ruff check` are **not** a green suite — CI is the gate.
 

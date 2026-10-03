@@ -135,6 +135,7 @@ about what was published; the artifact is not.
 ```python
 # Fetch and unpack both versions' wheels from PyPI, then diff the module.
 import io, json, urllib.request, zipfile, pathlib
+
 d = json.load(urllib.request.urlopen("https://pypi.org/pypi/<pkg>/json"))
 for v in ("<old>", "<new>"):
     url = next(f["url"] for f in d["releases"][v] if f["packagetype"] == "bdist_wheel")
