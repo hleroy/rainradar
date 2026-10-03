@@ -69,13 +69,28 @@ These override every verdict below.
 For each PR, read its facts, its check runs and its changed files (see the tooling
 table for the call that fits your environment).
 
-Record: every constituent dependency with its **exact old → new version**, the files
-touched, mergeability (`MERGEABLE` + `CLEAN`), and the conclusion of each check
-(`ci / tests`, `conventional-title`, `GitGuardian Security Checks`).
+Record: every constituent dependency with its **exact old → new version**, the
+**publication date of the new version** (PyPI upload time, image push time, or the
+release/tag date upstream), the files touched, mergeability (`MERGEABLE` + `CLEAN`),
+and the conclusion of each check (`ci / tests`, `conventional-title`,
+`GitGuardian Security Checks`).
 
 A grouped PR (e.g. "Bump the python group with 8 updates") must be decomposed — the
 PR body lists each `Updates X from A to B`. Every constituent is researched
-individually. Docker and github-actions PRs get the same treatment via the diff.
+individually. Docker, github-actions and pre-commit PRs get the same treatment via
+the diff.
+
+### Flag fresh releases
+
+`dependabot.yml` gives every ecosystem a **7-day cooldown** (14 for uv majors), so
+a routine version update never carries a release younger than that. A constituent
+published **less than 7 days ago** therefore bypassed the cooldown — almost always
+because it is a **Dependabot security update** (those skip cooldown by design), or
+because someone triggered it by hand. That is exactly the release a supply-chain
+attack would ship: an advisory creates urgency, and nobody has had time to look at the
+artifact yet. Mark each such constituent **fresh** and run Step 2b on it on top of
+the normal research. The same applies to any PR that links a GHSA/CVE advisory or
+whose body says it fixes a vulnerability, whatever the release's age.
 
 ## Step 2 — Research each bump (mandatory, no shortcuts)
 
@@ -135,6 +150,51 @@ name the specific changes you found, so the verdict can be audited. If the artif
 cannot be obtained or the diff shows changes whose impact you cannot resolve, it stays
 REVIEW NEEDED — this technique replaces a missing changelog, not the judgment.
 
+## Step 2b — Extra scrutiny for fresh and security releases
+
+Mandatory for every constituent flagged in Step 1. The question is no longer only
+"does this change break us?" but "is this release what it claims to be?". Record
+each answer in the comment.
+
+1. **Confirm the advisory.** Open the linked GHSA/CVE. Check that it actually
+   affects the version we are leaving, that the new version is the advisory's
+   first patched version (or the nearest one), and that the vulnerable code path is
+   something this repo uses — grep for it. A "security" bump that skips far past the
+   first patched version is pulling in more fresh code than the fix needs; say so.
+2. **Diff the artifact, always.** For a fresh release the artifact diff from Step 2
+   is required even when a changelog exists — release notes are written by the
+   same account that would publish a malicious build. Beyond the usual review,
+   look for: install- or import-time execution (`setup.py`/build-backend changes,
+   new `.pth` files, code run at module import), new network calls or subprocess
+   use, encoded/obfuscated blobs (`base64`, `exec`, `eval`, `marshal`), new
+   compiled binaries, and new entries in `Requires-Dist` (a new transitive
+   dependency is a new, unreviewed supplier). The fix should be **small and match
+   the advisory**; anything unrelated to it in a security release is a red flag.
+3. **Check provenance.** The release must line up with upstream: a matching tag
+   or GitHub release on the project's repository, published from the same place as
+   previous releases. On PyPI, compare the new files' publisher/attestations
+   (`https://pypi.org/integrity/<pkg>/<version>/<filename>/provenance`) with the
+   previous release — a release that drops Trusted Publishing, or comes from a
+   different uploader than its predecessors, is a red flag. For github-actions,
+   the new SHA must be the commit the upstream tag points to
+   (`git ls-remote --tags https://github.com/<owner>/<repo>.git`); for docker,
+   the tag must come from the official image's normal build.
+4. **Check it has not already been pulled.** Look for the version being yanked
+   (PyPI JSON `yanked` flag), for an advisory against the *new* version
+   (`https://api.osv.dev/v1/query`), and for upstream issues reporting a
+   compromised or broken release.
+
+Verdict impact:
+
+- A fresh release can be **SAFE TO MERGE** only when all four checks pass cleanly
+  and Step 2 found nothing — and the comment must say it is fresh, how old it is,
+  and what was verified.
+- Any check you could not complete (no artifact, no upstream tag, provenance you
+  cannot establish) makes it **REVIEW NEEDED**, naming the release's age — the
+  maintainer can wait the remaining cooldown days or merge after their own look.
+- Anything suspicious (unexplained code, provenance mismatch, unexplained new
+  dependency, yanked) is **DO NOT MERGE**. Say exactly what you saw.
+
 ## Step 3 — Weigh it against this repo's invariants
 
 `CLAUDE.md` lists non-negotiables. Flag a bump that plausibly touches any of them,
@@ -143,8 +203,15 @@ even when CI is green — the suite does not cover everything:
 - **Python 3.14 / PEP 758.** `requires-python = "==3.14.*"`. Anything that would
   move the interpreter, or a tool that cannot parse 3.14 syntax, is DO NOT MERGE.
 - **Ruff.** Pinned in `pyproject.toml` *and* as the `ruff-pre-commit` rev in
-  `.pre-commit-config.yaml`; Dependabot only updates the first. **Any ruff PR is
-  always REVIEW NEEDED**, with the comment naming the exact `rev:` line to sync.
+  `.pre-commit-config.yaml`. Dependabot opens **two** PRs for one ruff release —
+  the uv `ruff` group and the pre-commit `ruff-pre-commit` group — and they must
+  land together at the **same version**. **Any ruff PR is always REVIEW NEEDED**;
+  the comment names its counterpart PR, or, if the counterpart is missing, the
+  exact line to sync by hand.
+- **pre-commit hooks** — a hook bump changes what runs on every local commit and
+  on the `commit-msg` stage. `conventional-pre-commit` must keep accepting the
+  same type list as `.github/workflows/pr-title.yml`; `gitleaks` must keep
+  honouring `.gitleaks.toml`.
 - **`pywebpush`** — the only module allowed to import it is `radar/alerts/webpush.py`
   (sync → `to_thread` + semaphore + timeout). Check for API/signature changes.
 - **Django** — check release notes for changes to async views, ASGI, cache, or the
@@ -156,7 +223,10 @@ even when CI is green — the suite does not cover everything:
 - **Base images (docker)** — a Postgres or Nginx major is DO NOT MERGE (prod data /
   the `location = /` + terminal 404 routing rules). Python base image must stay 3.14.
 - **github-actions** — a major bump of an action can silently change defaults; verify
-  against `tests.yml` / `deploy.yml` usage.
+  against `tests.yml` / `deploy.yml` / `pr-title.yml` usage. Actions are pinned to
+  full commit SHAs with a `# vX.Y.Z` comment: check the new SHA is the commit the
+  upstream tag points to, and that the comment was bumped to match. A PR that
+  replaces a SHA with a bare tag is DO NOT MERGE.
 
 ### Ask what CI can actually see
 
@@ -175,6 +245,7 @@ touch needs **stronger** independent evidence than one they really run, not weak
 **SAFE TO MERGE** — all of:
 - every check green, `MERGEABLE` and `CLEAN`;
 - every constituent is a **patch or minor** bump (never a major);
+- every **fresh** constituent passed Step 2b in full;
 - step 2 completed for each — the changelog actually read, or, where none exists, the
   artifact diffed;
 - no breaking/deprecated/default change that this codebase exercises;
@@ -182,9 +253,10 @@ touch needs **stronger** independent evidence than one they really run, not weak
 - not a ruff PR.
 
 **REVIEW NEEDED** — anything unresolved rather than known-bad: a major bump, a ruff
-bump, a release whose content you could establish from neither notes nor artifact, a
-behavioral change whose impact you cannot rule out, a failing-but-plausibly-flaky
-check, or an invariant that needs a human eye.
+bump, a fresh release Step 2b could not fully verify, a release whose content you
+could establish from neither notes nor artifact, a behavioral change whose impact you
+cannot rule out, a failing-but-plausibly-flaky check, or an invariant that needs a
+human eye.
 
 **DO NOT MERGE** — known-bad: a breaking change this project demonstrably uses, an
 interpreter/base-image violation, a security regression, a check failing for a real
@@ -209,6 +281,7 @@ The comment must carry the reasoning, not just the verdict:
 ## <VERDICT>
 
 **Checks:** ci / tests ✅ · conventional-title ✅ · GitGuardian ✅ · MERGEABLE/CLEAN
+**Release age:** <each new version's publication date; for a fresh one, "FRESH — N days, security update for GHSA-…" plus the Step 2b results>
 
 | Package | Old → New | Type | Finding |
 |---|---|---|---|

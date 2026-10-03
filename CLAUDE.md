@@ -221,6 +221,14 @@ So, in an environment whose ambient Python is older (Claude Code on the web ship
   the PR title (the subject that actually lands via squash-merge). Keep both type
   lists identical when you change them. Enable the local hooks once with
   `pre-commit install --hook-type commit-msg --hook-type pre-push`.
+- **Dependency updates have a supply-chain cooldown.** Every ecosystem in
+  `.github/dependabot.yml` declares an explicit `cooldown:` (7 days; 14 for uv
+  majors) so a freshly published — possibly compromised — release is never proposed
+  until it has been public a week. Keep the block on every entry, including any new
+  one. Security updates bypass cooldown by design; the `dependabot-triage` skill
+  scrutinises those fresh releases instead (Step 2b). GitHub Actions are pinned to
+  full commit SHAs with a `# vX.Y.Z` comment — never a bare tag — and Dependabot
+  needs that comment to apply the cooldown.
 - Views are `async def` and call only the provider/source interfaces, `radar.cache`,
   the archive models, and `radar.storage` — never a specific upstream.
 - Config lives in settings constants (base/local/production), not in env. Only
