@@ -50,7 +50,7 @@ dev = [
   "pytest-django>=4.14.0",
   "pytest-sugar>=1.0",
   "respx>=0.21",
-  "ruff==0.16.1",
+  "ruff==0.16.9",
 ]
 
 # ==== ruff ====
@@ -172,7 +172,7 @@ ini_options.addopts = [
 ini_options.asyncio_mode = "auto"
 
 [tool.coverage]
-run.omit = [ "*/migrations/*", "*/tests/*" ]
 # ==== Coverage ====
 run.source = [ "radar" ]
+run.omit = [ "*/migrations/*", "*/tests/*" ]
 report.show_missing = true
