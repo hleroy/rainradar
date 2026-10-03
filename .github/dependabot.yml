@@ -1,14 +1,38 @@
 # Config for Dependabot updates. See Documentation here:
 # https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+#
+# Supply-chain cooldown — EVERY ecosystem below declares an explicit `cooldown:`.
+# Dependabot won't propose a release until it has been public for that many days,
+# which is the window in which compromised releases (hijacked maintainer accounts,
+# poisoned CI, typo-squats slipped into a dependency tree) are usually caught and
+# yanked. Policy: 7 days for everything, 14 for semver-major where the ecosystem
+# can tell majors apart (only `uv` here). Patches get no shortcut: a malicious
+# release is almost always shipped as a patch bump, precisely because that is what
+# gets picked up fastest. Nothing is excluded — dev tooling (ruff, pre-commit
+# hooks, actions) is as much an attack target as runtime code.
+#
+# Cooldown applies to VERSION updates only. Dependabot SECURITY updates bypass it
+# and open immediately, so a fix for a known advisory is never delayed — the
+# dependabot-triage skill gives those fresh releases extra scrutiny instead.
+#
+# Every update entry needs the block: declaring it explicitly (rather than relying
+# on Dependabot's implicit 3-day default) is what makes the policy reviewable and
+# keeps it from silently changing with the platform default.
 
 version: 2
 updates:
-  # Update GitHub actions in workflows
+  # Update GitHub actions in workflows. Actions are pinned to full commit SHAs
+  # with a `# vX.Y.Z` comment: a tag can be re-pointed by whoever controls the
+  # upstream repo (the tj-actions/changed-files compromise), a SHA cannot.
+  # Dependabot bumps the SHA and the comment together, and it needs that version
+  # comment to know the release date — without it, cooldown is not applied.
   - package-ecosystem: 'github-actions'
     directory: '/'
     # Every weekday
     schedule:
       interval: 'daily'
+    cooldown:
+      default-days: 7
     groups:
       github-actions:
         patterns:
@@ -16,14 +40,15 @@ updates:
 
   # Enable version updates for Docker
   - package-ecosystem: 'docker'
-    # Look for a `Dockerfile` in the `compose/local/django` directory
+    # Look for a `Dockerfile` in the `compose/*/django` directories
     directories:
       - 'compose/local/django/'
-      - 'compose/local/docs/'
       - 'compose/production/django/'
     # Every weekday
     schedule:
       interval: 'daily'
+    cooldown:
+      default-days: 7
     # Ignore minor version updates (3.10 -> 3.11) but update patch versions
     ignore:
       - dependency-name: '*'
@@ -39,21 +64,20 @@ updates:
   - package-ecosystem: 'docker'
     # Look for a `Dockerfile` in the listed directories
     directories:
-      - 'compose/local/node/'
-      - 'compose/production/aws/'
       - 'compose/production/postgres/'
-      - 'compose/production/traefik/'
       - 'compose/production/nginx/'
     # Every weekday
     schedule:
       interval: 'daily'
+    cooldown:
+      default-days: 7
     # A Postgres *major* bump is a data migration, not a dependency bump: the
     # server refuses to start against a PGDATA directory written by the previous
     # major, so changing the tag alone would take production down until someone
     # runs pg_upgrade or a dump/restore. That is an operator decision with a
     # maintenance window attached — never something to land from a bot PR. Minor
-    # and patch updates stay enabled. Scoped to `postgres` so traefik, nginx,
-    # node and aws in this same group keep receiving major bumps.
+    # and patch updates stay enabled. Scoped to `postgres` so nginx in this same
+    # entry keeps receiving major bumps.
     ignore:
       - dependency-name: 'postgres'
         update-types:
@@ -66,6 +90,8 @@ updates:
     # Every weekday
     schedule:
       interval: 'daily'
+    cooldown:
+      default-days: 7
 
   # Enable version updates for Python/uv
   - package-ecosystem: 'uv'
@@ -74,13 +100,19 @@ updates:
     # Every weekday
     schedule:
       interval: 'daily'
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+      semver-minor-days: 7
+      semver-patch-days: 7
     # `ruff` is pinned in TWO places that must move together — `pyproject.toml`
-    # and the `ruff-pre-commit` rev in `.pre-commit-config.yaml` — and the uv
-    # ecosystem only sees the first, so every ruff bump desyncs the pair (the
-    # older --fix hook then strips waivers the newer CI ruff needs). Patch bumps
-    # are pure churn against that cost, so they are ignored; anything larger
-    # gets its own PR via the `ruff` group below and is always triaged
-    # REVIEW NEEDED, because the pre-commit rev must be synced by hand.
+    # and the `ruff-pre-commit` rev in `.pre-commit-config.yaml`. This entry only
+    # sees the first; the `pre-commit` entry below sees the second, under the same
+    # ignore + cooldown, so the pair of PRs arrives together and is merged
+    # together (the older --fix hook otherwise strips waivers the newer CI ruff
+    # needs). Patch bumps are pure churn against that cost, so they are ignored;
+    # anything larger gets its own PR via the `ruff` group below and is always
+    # triaged REVIEW NEEDED.
     # NOTE: ruff is pre-1.0 and Dependabot uses strict semver, so 0.16 -> 0.17
     # is a *minor* update here, not a major one. Ignoring patch is what actually
     # expresses "only significant ruff releases".
@@ -98,3 +130,28 @@ updates:
       ruff:
         patterns:
           - 'ruff'
+
+  # Enable version updates for the pre-commit hook revs. Dependabot names each
+  # hook repo by its URL, so that is what the ignore/group patterns match.
+  - package-ecosystem: 'pre-commit'
+    directory: '/'
+    # Every weekday
+    schedule:
+      interval: 'daily'
+    cooldown:
+      default-days: 7
+    # Mirrors the uv entry's ruff ignore — see the comment there. The two must
+    # stay identical or the ruff pair stops arriving together.
+    ignore:
+      - dependency-name: 'https://github.com/astral-sh/ruff-pre-commit'
+        update-types:
+          - 'version-update:semver-patch'
+    groups:
+      pre-commit:
+        exclude-patterns:
+          - '*/ruff-pre-commit'
+        patterns:
+          - '*'
+      ruff-pre-commit:
+        patterns:
+          - '*/ruff-pre-commit'
