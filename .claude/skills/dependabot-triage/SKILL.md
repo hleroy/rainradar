@@ -96,6 +96,16 @@ d. Determine whether any of those changes touch **what this project actually use
 
 Never substitute an assumption ("patch bumps are usually fine") for step (b).
 
+**Digest-only docker bumps.** Base images are pinned as `tag@sha256:…`, so many docker
+PRs change only the digest: the same tag, republished upstream (an OS-package or
+security rebuild). There is no changelog; verify instead that the new digest is
+what the registry currently serves for that exact tag (anonymous token +
+`HEAD /v2/<repo>/manifests/<tag>`, read `docker-content-digest`), that the tag
+itself did not change, and — for the django images — that the uv build image and
+the `python` run image still ship the same Python 3.14 (the venv is built in one
+and run in the other). A digest that
+does not match the registry, or a PR that drops the `@sha256`, is DO NOT MERGE.
+
 ### When there is no changelog, diff the artifacts
 
 A missing changelog is not the end of the research — it is the point where you stop

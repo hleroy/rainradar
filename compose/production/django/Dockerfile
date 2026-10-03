@@ -1,6 +1,9 @@
-
+# Base images are pinned by digest as well as tag: a tag is mutable, so the
+# same Dockerfile could otherwise build a different (or tampered) image from one
+# day to the next. Dependabot refreshes the digest — after its cooldown —
+# when the tag is republished. Never drop the @sha256.
 # define an alias for the specific python version used in this file.
-FROM ghcr.io/astral-sh/uv:python3.14-bookworm-slim AS python-build-stage
+FROM ghcr.io/astral-sh/uv:python3.14-bookworm-slim@sha256:7cf77f594be8042dab6daa9fe326f90962252268b4f120a7f5dccce4d947e6c1 AS python-build-stage
 
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=0
 
@@ -29,7 +32,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev
 
 # Python 'run' stage
-FROM python:3.14-slim-bookworm AS python-run-stage
+FROM python:3.14-slim-bookworm@sha256:c8137f4c460908c8763f281c8f22c431eb5c538514ba9553fc3a89c06b7cfb88 AS python-run-stage
 
 ARG APP_HOME=/app
 
