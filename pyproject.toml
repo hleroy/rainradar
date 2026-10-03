@@ -53,6 +53,26 @@ dev = [
   "ruff==0.16.1",
 ]
 
+# ==== uv ====
+[tool.uv]
+# Supply-chain cooldown at the install layer: uv ignores any distribution
+# uploaded less than 7 days ago when it resolves (`uv lock`, `uv add`,
+# `uv lock --upgrade`, and the dev image's `uv sync`). Mirrors the 7-day
+# Dependabot `cooldown:` on the uv entry — the two must stay equal, or
+# Dependabot proposes versions this resolver refuses to lock.
+#
+# Security updates are the one cost: Dependabot lets them skip its cooldown,
+# but they cannot skip this, so a fix younger than 7 days fails to lock. To take it
+# early, add a per-package exception in the same PR and delete it once the
+# release is a week old:
+#   exclude-newer-package = { <package> = false }
+#
+# Relative durations need uv >= 0.9.17. An older uv cannot parse them and drops
+# this WHOLE table with only a warning (so a `required-version` here could not
+# guard it either); `uv.lock` records the span, so a lock re-resolved without
+# it shows up as an `[options]` diff and the production build's `--locked` sync.
+exclude-newer = "7 days"
+
 # ==== ruff ====
 [tool.ruff]
 line-length = 100

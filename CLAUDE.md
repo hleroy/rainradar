@@ -238,6 +238,14 @@ So, in an environment whose ambient Python is older (Claude Code on the web ship
   when the running event loop changes — needed because WSGI `runserver` uses a fresh
   loop per request (uvicorn uses one). See `radar/cache.py` and
   `radar/providers/rainviewer.py`.
+- **uv refuses releases younger than 7 days** (`[tool.uv] exclude-newer = "7 days"`
+  in `pyproject.toml`, kept equal to the Dependabot uv `cooldown:`). If `uv lock`
+  says a version "was published after the exclude newer time", that is the policy
+  working — wait, or pin an older version. Never shorten the window to make a lock
+  pass. The one legitimate exception is a security fix younger than a week:
+  add `exclude-newer-package = { <package> = false }` in that same PR and remove it
+  once the release has aged. Needs uv ≥ 0.9.17 — an older uv silently drops the
+  setting with a warning; the SessionStart hook upgrades a web session's uv.
 
 ## Production notes
 

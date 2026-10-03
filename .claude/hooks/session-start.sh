@@ -18,6 +18,19 @@ if [ "${CLAUDE_CODE_REMOTE:-}" != "true" ]; then
   exit 0
 fi
 
+# 0. A uv new enough for pyproject's [tool.uv]: the relative
+#    `exclude-newer = "7 days"` needs >= 0.9.17. A web session's bundled uv can be
+#    older: it then drops the whole table with a warning, and would resolve without
+#    the supply-chain cooldown. Upgrade from PyPI — `uv self update` goes through
+#    the GitHub API and is rate-limited here. `--no-config` keeps the old uv from
+#    reading the project config it cannot parse.
+UV_MIN="0.9.17"
+UV_HAVE="$(uv --version | awk '{print $2}')"
+if [ "$(printf '%s\n%s\n' "$UV_MIN" "$UV_HAVE" | sort -V | head -1)" != "$UV_MIN" ]; then
+  uv tool install --no-config --quiet --force "uv>=${UV_MIN}"
+  hash -r
+fi
+
 cd "${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "$0")/../.." && pwd)}"
 
 # 1. The interpreter the project targets. ~4 s cold, a no-op once cached. A *bare*
