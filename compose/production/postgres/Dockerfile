@@ -4,7 +4,7 @@
 # Majors are ignored in .github/dependabot.yml — they need pg_upgrade.
 # Also pinned by digest: tags are mutable; Dependabot refreshes the digest
 # (after its cooldown) when the tag is republished. Never drop the @sha256.
-FROM docker.io/postgres:17.11@sha256:d74eeac9a635390a49bc21bd49fccd973de707e2a53a76ac49b552b8712ec46f
+FROM docker.io/postgres:17.11@sha256:2d2b8998d31037bf721cfdf764d76ba74171b4fab3431b7f72c27c56ddbdf9e3
 
 COPY ./compose/production/postgres/maintenance /usr/local/bin/maintenance
 RUN chmod +x /usr/local/bin/maintenance/*
