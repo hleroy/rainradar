@@ -16,7 +16,7 @@ classifiers = [
 ]
 dependencies = [
   "apscheduler==3.11.3",
-  "django==6.1.1",
+  "django==6.1.2",
   "django-environ==0.14.0",
   "django-redis==7.0.0",
   "gunicorn==26.2.0",
@@ -38,7 +38,7 @@ dependencies = [
   "uvicorn-worker==0.4.0",
   # WebSocket client for the Blitzortung lightning ingester. httpx cannot
   # do WebSockets, hence the dedicated dep.
-  "websockets==17.1",
+  "websockets==17.2",
 ]
 
 [dependency-groups]
