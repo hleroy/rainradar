@@ -50,7 +50,7 @@ dev = [
   "pytest-django>=4.14.0",
   "pytest-sugar>=1.0",
   "respx>=0.21",
-  "ruff==0.16.9",
+  "ruff==0.17.0",
 ]
 
 # ==== ruff ====
