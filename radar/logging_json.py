@@ -10,7 +10,7 @@ log a canonical archiver/view event so every record carries ``event`` +
 from __future__ import annotations
 
 import asyncio
-import datetime as _dt
+import datetime as dt
 import json
 import logging
 
@@ -67,7 +67,7 @@ class JsonFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         payload: dict[str, object] = {
-            "timestamp": _dt.datetime.fromtimestamp(record.created, tz=_dt.UTC).isoformat(),
+            "timestamp": dt.datetime.fromtimestamp(record.created, tz=dt.UTC).isoformat(),
             "level": record.levelname,
             "logger": record.name,
             "message": record.getMessage(),
