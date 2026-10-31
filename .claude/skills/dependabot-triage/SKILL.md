@@ -341,9 +341,9 @@ Apply both with the calls from the tooling table. When labelling via
 `mcp__github__issue_write`, remember it **replaces** the label set: pass the PR's
 existing labels back alongside the verdict label, minus any of the other two verdicts.
 
-Pass the comment body inline (a `gh` heredoc, or the MCP tool's `body` argument). Do
-not write it to a file first — this routine runs without file-write tools by design,
-so that it cannot modify the working tree.
+Pass the comment body inline (a `gh` heredoc, or the MCP tool's `body` argument), never
+via a file: triage never writes to the working tree. Scratch work, such as unpacked
+wheels or old-vs-new environments, goes in a temporary directory outside the checkout.
 
 The comment must carry the reasoning, not just the verdict:
 
