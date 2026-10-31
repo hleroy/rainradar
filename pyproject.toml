@@ -27,7 +27,7 @@ dependencies = [
   "hiredis==3.5.0",
   "httpx==0.28.1",
   "numpy==2.5.4",
-  "pillow==12.3.0",
+  "pillow==13.0.0",
   "psycopg[c]==3.3.6",
   "pyproj==3.8.0",
   # Web Push sender for background storm alerts. Synchronous (requests-based);
