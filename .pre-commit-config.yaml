@@ -31,15 +31,27 @@ repos:
       - id: django-upgrade
         args: ['--target-version', '6.0']
 
-  # Run the Ruff linter.
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.17.0
+  # Ruff linter + formatter, run from the project's own pin. ruff is pinned ONCE,
+  # in pyproject.toml / uv.lock — the same version CI lints with — so the hook can
+  # never drift from CI. (We used to pull astral-sh/ruff-pre-commit at its own
+  # `rev:`, a second pin Dependabot kept bumping on its own.) `--only-group dev`
+  # installs just the dev tools, not the app (psycopg[c] needs a compiler).
+  # Hook definitions mirror upstream ruff-pre-commit's.
+  - repo: local
     hooks:
-      # Linter
       - id: ruff-check
+        name: ruff check
+        entry: uv run --frozen --only-group dev ruff check --force-exclude
         args: [--fix, --exit-non-zero-on-fix]
-      # Formatter
+        language: system
+        types_or: [python, pyi, jupyter]
+        require_serial: true
       - id: ruff-format
+        name: ruff format
+        entry: uv run --frozen --only-group dev ruff format --force-exclude
+        language: system
+        types_or: [python, pyi, jupyter, markdown]
+        require_serial: true
 
   - repo: https://github.com/tox-dev/pyproject-fmt
     rev: v2.30.3
@@ -80,14 +92,3 @@ repos:
         pass_filenames: false
         always_run: true
         stages: [pre-push]
-
-# sets up .pre-commit-ci.yaml to ensure pre-commit dependencies stay up to date
-ci:
-  autoupdate_schedule: weekly
-  skip:
-    # Gitleaks uses golang and needs network to resolve modules; skip on CI.
-    - gitleaks
-    # pytest needs the Docker stack; it runs locally (pre-push) and in the CI
-    # pytest job, not in pre-commit.ci.
-    - pytest
-  submodules: false

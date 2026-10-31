@@ -105,14 +105,15 @@ updates:
       semver-major-days: 14
       semver-minor-days: 7
       semver-patch-days: 7
-    # `ruff` is pinned in TWO places that must move together — `pyproject.toml`
-    # and the `ruff-pre-commit` rev in `.pre-commit-config.yaml`. This entry only
-    # sees the first; the `pre-commit` entry below sees the second, under the same
-    # ignore + cooldown, so the pair of PRs arrives together and is merged
-    # together (the older --fix hook otherwise strips waivers the newer CI ruff
-    # needs). Patch bumps are pure churn against that cost, so they are ignored;
-    # anything larger gets its own PR via the `ruff` group below and is always
-    # triaged REVIEW NEEDED.
+    # `ruff` is pinned in ONE place — `pyproject.toml` / `uv.lock`. CI lints with
+    # it, and the pre-commit ruff hooks are `repo: local` hooks that `uv run` the
+    # same pin, so this entry is the only one that ever moves ruff. (They used to
+    # pull astral-sh/ruff-pre-commit at its own `rev:`; Dependabot kept proposing
+    # that rev's patch bumps on their own, since its ignore never matched the
+    # `v`-prefixed tags, which left the hook and CI on different ruff versions.)
+    # A ruff upgrade can add rules that fail CI, and patch bumps are pure churn
+    # against that cost, so they are ignored; anything larger gets its own PR via
+    # the `ruff` group below and is always triaged REVIEW NEEDED.
     # NOTE: ruff is pre-1.0 and Dependabot uses strict semver, so 0.16 -> 0.17
     # is a *minor* update here, not a major one. Ignoring patch is what actually
     # expresses "only significant ruff releases".
@@ -140,18 +141,8 @@ updates:
       interval: 'daily'
     cooldown:
       default-days: 7
-    # Mirrors the uv entry's ruff ignore — see the comment there. The two must
-    # stay identical or the ruff pair stops arriving together.
-    ignore:
-      - dependency-name: 'https://github.com/astral-sh/ruff-pre-commit'
-        update-types:
-          - 'version-update:semver-patch'
+    # ruff is not here: its hooks are `repo: local` and follow the uv pin above.
     groups:
       pre-commit:
-        exclude-patterns:
-          - '*/ruff-pre-commit'
         patterns:
           - '*'
-      ruff-pre-commit:
-        patterns:
-          - '*/ruff-pre-commit'
