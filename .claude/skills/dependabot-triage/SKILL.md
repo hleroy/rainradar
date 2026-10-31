@@ -9,18 +9,30 @@ Review every open Dependabot PR on `hleroy/rainradar`, classify it, and merge wh
 is genuinely safe. This runs unattended on a weekly schedule, so **the burden of
 proof is on merging** — when the evidence is thin, escalate rather than merge.
 
-## Tooling — check for `gh` first
+This file is the **only** triage rubric. The weekly routine's prompt deliberately
+holds just its setup and a short list of absolute bans, and defers to this file for
+every verdict rule, so change the rules here and nowhere else.
 
-**The scheduled cloud sandbox has no `gh` CLI.** Run `which gh` before relying on it.
-Both paths below are supported; the verdicts and the hard rules are identical either
-way, only the transport differs.
+## Tooling — pick the transport first
+
+**In the scheduled cloud routine, do not use `gh`.** It is either missing or not
+authenticated there (its `GH_TOKEN` is rejected). Use the `mcp__github__*` tools; load
+them first with ToolSearch:
+`select:mcp__github__list_pull_requests,mcp__github__pull_request_read,mcp__github__issue_read,mcp__github__issue_write,mcp__github__add_issue_comment,mcp__github__merge_pull_request`.
+Locally, an authenticated `gh` works too. The verdicts and the hard rules are
+identical either way; only the transport differs.
+
+**If neither transport is available, stop at once.** Do not research anything, and do
+not write verdicts you cannot apply. Send one push notification,
+"Dependabot triage BLOCKED — <what is missing>", and end the run.
 
 | Operation | With `gh` (local) | Without `gh` (cloud routine) |
 |---|---|---|
 | List open PRs | `gh pr list --author 'app/dependabot' --state open --json number,title,url` | `mcp__github__list_pull_requests` (`state: "open"`, then filter to `app/dependabot` yourself) |
 | PR facts | `gh pr view <n> --json …` | `mcp__github__pull_request_read` `method: "get"` |
-| Check runs | (included in `statusCheckRollup`) | `mcp__github__pull_request_read` `method: "get_check_runs"` |
+| Check runs | (included in `statusCheckRollup`) | `mcp__github__pull_request_read` `method: "get_check_runs"` (not `get_status`) |
 | Changed files | `gh pr diff <n> --name-only` | `mcp__github__pull_request_read` `method: "get_files"` |
+| Current labels | `gh pr view <n> --json labels` | `mcp__github__issue_read` `method: "get_labels"` |
 | Label | `gh api -X POST repos/hleroy/rainradar/issues/<n>/labels -f 'labels[]=<verdict>'` | `mcp__github__issue_write` `method: "update"` |
 | Comment | `gh pr comment <n> --body "…"` | `mcp__github__add_issue_comment` |
 | Merge | `gh pr merge <n> --squash` | `mcp__github__merge_pull_request` (`merge_method: "squash"`) |
@@ -52,6 +64,7 @@ If there are none, send the push notification saying so and stop.
 These override every verdict below.
 
 - **Never merge into anything but `main` via squash.** Squash is the only merge method.
+  Never commit to `main` directly.
 - **Never push commits to a Dependabot branch.** If a PR needs a code change to be
   correct, that is REVIEW NEEDED — describe the change, do not make it.
 - **Never modify `dependabot.yml`, workflows, or project files** during triage.
@@ -206,6 +219,45 @@ Verdict impact:
 - Anything suspicious (unexplained code, provenance mismatch, unexplained new
   dependency, yanked) is **DO NOT MERGE**. Say exactly what you saw.
 
+## Step 2c — Major bumps
+
+A major bump is not disqualifying on its own. It only says upstream allowed itself
+to break something, and Step 2 already decides whether that breakage reaches this
+repo. But a major needs **more evidence** than a minor, not the same amount. It applies
+to a semver major, a GitHub Action `vN → vN+1`, and a pre-commit hook major.
+
+A major constituent can be SAFE TO MERGE only when **all** of these hold, each
+recorded in the comment:
+
+1. **The full upgrade or migration guide was read** for every major in the range,
+   at its source (the upstream docs or release-notes file at that tag). The PR body,
+   a search snippet or a summary does not count. List each breaking change, what
+   you grepped for, and whether it was found.
+2. **It is a single major step.** A range that skips a major (3 → 5) is REVIEW
+   NEEDED.
+3. **The new version has been public for at least 14 days**, verified against its
+   publication date. Only uv applies a 14-day cooldown to majors; the other
+   ecosystems use 7, and an `.0.0` release often gets a quick `.0.1` regression fix.
+   An unverified date is REVIEW NEEDED.
+4. **If CI cannot see the dependency, produce your own evidence.** This applies when
+   the suite mocks the dependency out (see "Ask what CI can actually see"), and to
+   any pre-commit hook, since CI never runs pre-commit. Run the affected code on the
+   old and the new version and compare the results. Use throwaway environments
+   built with `uv` on `$RAINRADAR_PYTHON` (for example `uv run --no-project
+   --python "$RAINRADAR_PYTHON" --with <pkg>==<old> …`, then the same with `<new>`),
+   or run the hook at both versions over a scratch copy of the files it touches.
+   The pillow 12 → 13 review (#60) is the model: the same render, byte-identical
+   tiles on both versions. If you cannot produce that evidence, it is REVIEW NEEDED.
+5. **The package is not on the always-review list:** Django, numpy (the linear-Z
+   render math), the Python interpreter or base image, and the Postgres, Nginx and
+   Redis server images. A major of any of these is never SAFE TO MERGE; the Step 3
+   rules that make some of them DO NOT MERGE still apply.
+
+The cost of a wrong call is bounded: merging to `main` does not deploy (production
+moves only on a version tag), and the Saturday run leaves the weekend to revert.
+That is why a verified major may merge unattended. It is not a reason to relax any
+of the five checks.
+
 ## Step 3 — Weigh it against this repo's invariants
 
 `CLAUDE.md` lists non-negotiables. Flag a bump that plausibly touches any of them,
@@ -213,16 +265,18 @@ even when CI is green — the suite does not cover everything:
 
 - **Python 3.14 / PEP 758.** `requires-python = "==3.14.*"`. Anything that would
   move the interpreter, or a tool that cannot parse 3.14 syntax, is DO NOT MERGE.
-- **Ruff.** Pinned **once**, in `pyproject.toml` / `uv.lock`. CI lints with that
-  pin, and the `ruff-check` / `ruff-format` pre-commit hooks are `repo: local`
-  hooks that `uv run` it, so one uv `ruff` group PR moves everything — there is
-  no counterpart PR to look for. **Any ruff PR is still always REVIEW NEEDED**: a
-  new ruff can add or change rules that fail `ruff check` in CI (0.17.0 did, with
-  `ICN001`) or that the `--fix` hook rewrites, and a human should take that
-  churn. Name any new findings and the fix. CI only runs `ruff check`, never
-  `ruff format --check`, so call out formatter changes separately. A PR that
-  bumps `astral-sh/ruff-pre-commit` should no longer exist; if one appears, the
-  hook config has regressed: **DO NOT MERGE**, and say so.
+- **Ruff.** Pinned **once**, in `pyproject.toml` / `uv.lock`. CI runs both
+  `ruff check .` and `ruff format --check .` on that pin, and the `ruff-check` /
+  `ruff-format` pre-commit hooks are `repo: local` hooks that `uv run` it. So one
+  uv `ruff` group PR moves everything, there is no counterpart PR to look for, and
+  green CI covers both lint findings and formatter output. A ruff PR follows the
+  normal rubric. Patch updates are ignored in `dependabot.yml`, so every ruff PR is
+  a 0.x minor, which is where ruff ships its breaking changes: read the full
+  changelog, including rule promotions and changed defaults. If CI is red on a new
+  rule (0.17.0 did that with `ICN001`), the fix is a code change, so the PR is
+  REVIEW NEEDED; name the findings and the fix. A PR that bumps
+  `astral-sh/ruff-pre-commit` should no longer exist; if one appears, the hook
+  config has regressed: **DO NOT MERGE**, and say so.
 - **pre-commit hooks** — a hook bump changes what runs on every local commit and
   on the `commit-msg` stage. `conventional-pre-commit` must keep accepting the
   same type list as `.github/workflows/pr-title.yml`; `gitleaks` must keep
@@ -259,23 +313,24 @@ touch needs **stronger** independent evidence than one they really run, not weak
 
 **SAFE TO MERGE** — all of:
 - every check green, `MERGEABLE` and `CLEAN`;
-- every constituent is a **patch or minor** bump (never a major);
+- every **major** constituent passed Step 2c in full;
 - every **fresh** constituent passed Step 2b in full;
 - step 2 completed for each — the changelog actually read, or, where none exists, the
   artifact diffed;
 - no breaking/deprecated/default change that this codebase exercises;
-- touches none of the invariants above;
-- not a ruff PR.
+- touches none of the invariants above.
 
-**REVIEW NEEDED** — anything unresolved rather than known-bad: a major bump, a ruff
-bump, a fresh release Step 2b could not fully verify, a release whose content you
-could establish from neither notes nor artifact, a behavioral change whose impact you
-cannot rule out, a failing-but-plausibly-flaky check, or an invariant that needs a
-human eye.
+**REVIEW NEEDED** — anything unresolved rather than known-bad: a major bump that did
+not pass every check in Step 2c, a fresh release Step 2b could not fully verify, a
+bump that needs a code fix on the branch (such as a new ruff rule failing CI), a
+release whose content you could establish from neither notes nor artifact, a
+behavioral change whose impact you cannot rule out, a failing-but-plausibly-flaky
+check, or an invariant that needs a human eye.
 
 **DO NOT MERGE** — known-bad: a breaking change this project demonstrably uses, an
-interpreter/base-image violation, a security regression, a check failing for a real
-reason, or a conflicted branch.
+interpreter/base-image violation, a security regression, a check failing because the
+new version itself is broken (not merely because this code needs adapting), or a
+conflicted branch.
 
 ## Step 5 — Mark
 
@@ -328,7 +383,8 @@ mid-run is REVIEW NEEDED, not a failure.
 
 ## Step 7 — Report
 
-Send a push notification summarizing the run:
+Send a push notification summarizing the run (if the push-notification tool is
+unavailable, print the same line as the first line of the report instead):
 
 > Dependabot triage: N merged, N need review, N blocked (M PRs total)
 
