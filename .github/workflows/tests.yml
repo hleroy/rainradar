@@ -64,6 +64,13 @@ jobs:
       - name: ruff check
         run: docker compose run --rm --no-deps --entrypoint ruff django check .
 
+      # The formatter half of a ruff upgrade. Without this step a style change in a
+      # new ruff passes CI and only surfaces as unrelated reformatting in the next
+      # local commit (via the ruff-format hook). It also lets the Dependabot triage
+      # treat a ruff bump like any other dev dependency.
+      - name: ruff format --check
+        run: docker compose run --rm --no-deps --entrypoint ruff django format --check .
+
       # Catch model/migration drift (the project now has real models). The check
       # compares models to migration files and never connects to the DB, so
       # bypass the entrypoint's postgres wait (like the ruff step) — otherwise

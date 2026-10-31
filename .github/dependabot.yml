@@ -113,7 +113,8 @@ updates:
     # `v`-prefixed tags, which left the hook and CI on different ruff versions.)
     # A ruff upgrade can add rules that fail CI, and patch bumps are pure churn
     # against that cost, so they are ignored; anything larger gets its own PR via
-    # the `ruff` group below and is always triaged REVIEW NEEDED.
+    # the `ruff` group below. CI runs both `ruff check` and `ruff format --check`
+    # on the new pin, so the triage judges that PR like any other dev dependency.
     # NOTE: ruff is pre-1.0 and Dependabot uses strict semver, so 0.16 -> 0.17
     # is a *minor* update here, not a major one. Ignoring patch is what actually
     # expresses "only significant ruff releases".
