@@ -213,12 +213,16 @@ even when CI is green — the suite does not cover everything:
 
 - **Python 3.14 / PEP 758.** `requires-python = "==3.14.*"`. Anything that would
   move the interpreter, or a tool that cannot parse 3.14 syntax, is DO NOT MERGE.
-- **Ruff.** Pinned in `pyproject.toml` *and* as the `ruff-pre-commit` rev in
-  `.pre-commit-config.yaml`. Dependabot opens **two** PRs for one ruff release —
-  the uv `ruff` group and the pre-commit `ruff-pre-commit` group — and they must
-  land together at the **same version**. **Any ruff PR is always REVIEW NEEDED**;
-  the comment names its counterpart PR, or, if the counterpart is missing, the
-  exact line to sync by hand.
+- **Ruff.** Pinned **once**, in `pyproject.toml` / `uv.lock`. CI lints with that
+  pin, and the `ruff-check` / `ruff-format` pre-commit hooks are `repo: local`
+  hooks that `uv run` it, so one uv `ruff` group PR moves everything — there is
+  no counterpart PR to look for. **Any ruff PR is still always REVIEW NEEDED**: a
+  new ruff can add or change rules that fail `ruff check` in CI (0.17.0 did, with
+  `ICN001`) or that the `--fix` hook rewrites, and a human should take that
+  churn. Name any new findings and the fix. CI only runs `ruff check`, never
+  `ruff format --check`, so call out formatter changes separately. A PR that
+  bumps `astral-sh/ruff-pre-commit` should no longer exist; if one appears, the
+  hook config has regressed: **DO NOT MERGE**, and say so.
 - **pre-commit hooks** — a hook bump changes what runs on every local commit and
   on the `commit-msg` stage. `conventional-pre-commit` must keep accepting the
   same type list as `.github/workflows/pr-title.yml`; `gitleaks` must keep

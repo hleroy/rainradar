@@ -71,7 +71,7 @@ So, in an environment whose ambient Python is older (Claude Code on the web ship
   `uv python install 3.14`), or check inside the container.
 - **Never** run whatever `ruff` is on `PATH` — a different version invents findings
   (`RUF100` against preview rules it doesn't enable). Use the pin:
-  `uvx $RAINRADAR_RUFF check .` (`ruff@0.16.9`, from `pyproject.toml`).
+  `uvx $RAINRADAR_RUFF check .` (the `ruff==` pin from `pyproject.toml`).
 - Docker is unavailable in a web session, so the suite genuinely cannot run there.
   A clean parse and a clean `ruff check` are **not** a green suite — CI is the gate.
 
@@ -221,6 +221,12 @@ So, in an environment whose ambient Python is older (Claude Code on the web ship
   the PR title (the subject that actually lands via squash-merge). Keep both type
   lists identical when you change them. Enable the local hooks once with
   `pre-commit install --hook-type commit-msg --hook-type pre-push`.
+- **Ruff is pinned once**, in `pyproject.toml` / `uv.lock`. CI lints with that
+  pin, and the `ruff-check` / `ruff-format` pre-commit hooks are `repo: local`
+  hooks that `uv run --only-group dev` it, so they can't drift from CI. **Never
+  bring back `astral-sh/ruff-pre-commit`**: its separate `rev:` was a second pin
+  that Dependabot bumped on its own, leaving the `--fix` hook on a different ruff
+  than CI.
 - **Dependency updates have a supply-chain cooldown.** Every ecosystem in
   `.github/dependabot.yml` declares an explicit `cooldown:` (7 days; 14 for uv
   majors) so a freshly published — possibly compromised — release is never proposed
