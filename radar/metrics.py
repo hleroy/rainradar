@@ -103,7 +103,45 @@ async def render() -> str:
     ]
     lines += lightning
     lines += await _alert_series()
+    if settings.FORECAST_ENABLED:
+        lines += await _forecast_series()
     return "\n".join(lines) + "\n"
+
+
+_FORECAST_COUNTER_HELP = {
+    "not_ready": "Probes of a run not published upstream yet (404)",
+    "fetch_failed": "Runs that failed on a download or HTTP error",
+    "rejected": "Runs rejected for a wrong or undecodable payload",
+    "crashed": "Runs that failed on an unexpected error (disk, render, a bug)",
+    "bytes": "Bytes downloaded from PIAF",
+    "runs_published": "Forecast runs published",
+}
+
+
+async def _forecast_series() -> list[str]:
+    """Forecast exposition: the published run's age and lag, plus the job's counters."""
+    record = await cache.get_forecast_current() or {}
+    run = int(record.get("run", 0))
+    published_at = int(record.get("published_at", 0))
+    lines = [
+        "# HELP forecast_run_timestamp Reference time of the published forecast run (0 if none).",
+        "# TYPE forecast_run_timestamp gauge",
+        f"forecast_run_timestamp {run}",
+        "# HELP forecast_published_timestamp When that run was published (epoch, 0 if none).",
+        "# TYPE forecast_published_timestamp gauge",
+        f"forecast_published_timestamp {published_at}",
+        "# HELP forecast_publication_lag_seconds Run reference time to publication.",
+        "# TYPE forecast_publication_lag_seconds gauge",
+        f"forecast_publication_lag_seconds {published_at - run if run else 0}",
+    ]
+    for name, value in (await cache.get_forecast_counters()).items():
+        metric = f"forecast_{name}_total"
+        lines += [
+            f"# HELP {metric} {_FORECAST_COUNTER_HELP[name]} (counter).",
+            f"# TYPE {metric} counter",
+            f"{metric} {value}",
+        ]
+    return lines
 
 
 async def _alert_series() -> list[str]:

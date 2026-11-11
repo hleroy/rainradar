@@ -62,9 +62,18 @@ class MeteoFranceAuth:
             self._token, self._expires_at = await self._refresh()
             return self._token
 
-    async def invalidate(self) -> None:
-        """Drop the cached token so the next ``get_token`` refreshes (401 recovery)."""
+    async def invalidate(self, stale: str) -> None:
+        """Drop ``stale``, the token a 401 rejected, so the next ``get_token`` refreshes.
+
+        A no-op if the cache already holds a different token. Minting revokes the
+        application's previous token, and callers sharing this instance (the forecast's
+        concurrent leads, the observation poll) get their 401s back at different
+        moments: dropping whatever is cached would throw away the token another
+        caller's 401 just minted, and each late 401 would mint — and revoke — again.
+        """
         async with self._get_lock():
+            if self._token != stale:
+                return  # already replaced since that request went out: use the new one
             self._token = None
             self._expires_at = 0.0
 

@@ -1,4 +1,5 @@
 from .base import *  # noqa: F403
+from .base import FORECAST_ENABLED
 from .base import METEOFRANCE_APPLICATION_ID
 from .base import MIDDLEWARE
 from .base import PUSH_ALERTS_ENABLED
@@ -53,6 +54,7 @@ require_meteofrance_credentials(
     enabled=METEOFRANCE_ENABLED,
     application_id=METEOFRANCE_APPLICATION_ID,
     reflectivity=METEOFRANCE_REFLECTIVITY_ENABLED,
+    forecast=FORECAST_ENABLED,
 )
 require_vapid_keys(
     enabled=PUSH_ALERTS_ENABLED,

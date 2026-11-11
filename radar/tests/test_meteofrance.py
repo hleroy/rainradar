@@ -121,9 +121,32 @@ async def test_single_flight_under_concurrency():
 async def test_invalidate_forces_refresh():
     route = _token_route()
     auth = MeteoFranceAuth()
+    rejected = await auth.get_token()
+    await auth.invalidate(rejected)
     await auth.get_token()
-    await auth.invalidate()
-    await auth.get_token()
+    assert route.call_count == 2
+
+
+@_MF
+@respx.mock
+async def test_invalidating_a_superseded_token_keeps_the_new_one():
+    """A late 401 on an old token must not throw away the one minted since.
+
+    Minting revokes the previous token, so dropping the fresh one would cost another
+    mint that revokes the token every other caller just picked up.
+    """
+    route = respx.post(TOKEN_URL).mock(
+        side_effect=[
+            httpx.Response(200, json={"access_token": "tok-1", "expires_in": 3600}),
+            httpx.Response(200, json={"access_token": "tok-2", "expires_in": 3600}),
+        ]
+    )
+    auth = MeteoFranceAuth()
+    stale = await auth.get_token()
+    await auth.invalidate(stale)  # the first 401 on tok-1
+    assert await auth.get_token() == "tok-2"
+    await auth.invalidate(stale)  # a second, later 401 on tok-1
+    assert await auth.get_token() == "tok-2"
     assert route.call_count == 2
 
 
@@ -643,3 +666,64 @@ async def test_reflectivity_401_never_invalidates_the_shared_token(no_backoff):
     assert wash.call_count == 1, "a 401 the wash cannot fix must not be retried"
     assert rain.call_count == 1
     assert len(results) == 62
+
+
+# -- seams used by the forecast (radar.forecast) -------------------------------
+
+
+async def test_auth_is_the_one_shared_instance():
+    """The forecast reuses this token holder: a second one would revoke its token."""
+    provider = MeteoFranceProvider()
+    assert isinstance(provider.auth, MeteoFranceAuth)
+    assert provider.auth is provider.auth
+
+
+async def _render_one_frame(provider, data):
+    _token_route()
+    respx.get(DESC_URL).mock(return_value=httpx.Response(200, json=_desc_json()))
+    respx.get(PRODUCT_URL).mock(return_value=httpx.Response(200, content=build_odim(data=data)[0]))
+    frames = await provider.get_frames()
+    await provider.get_tile(frames[0].timestamp, 5, 16, 11)
+    return frames[0].timestamp
+
+
+@_MF
+@override_settings(FORECAST_ENABLED=True)
+@respx.mock
+async def test_decoded_frame_coverage_is_kept_for_the_forecast():
+    """nodata is "no coverage"; undetect and rain are coverage."""
+    data = np.full((256, 256), 65534, dtype=np.uint16)  # undetect
+    data[:, :50] = 65535  # nodata strip
+    data[100:110, 100:110] = RAW_3MMH
+    provider = MeteoFranceProvider()
+    assert provider.latest_coverage() is None
+
+    ts = await _render_one_frame(provider, data)
+
+    coverage = provider.latest_coverage()
+    assert coverage.ts == ts
+    assert coverage.covered.shape == (256, 256)
+    assert not coverage.covered[:, :50].any()
+    assert coverage.covered[:, 50:].all()
+
+
+@_MF
+@override_settings(FORECAST_ENABLED=True)
+@respx.mock
+async def test_coverage_only_moves_forward():
+    provider = MeteoFranceProvider()
+    ts = await _render_one_frame(provider, np.full((256, 256), 65534, dtype=np.uint16))
+    newer = provider.latest_coverage()
+    provider._coverage = type(newer)(ts=ts + 300, geo=newer.geo, covered=newer.covered)
+    provider._tasks.clear()
+    await provider.get_tile(ts, 5, 16, 11)  # re-renders the older frame
+    assert provider.latest_coverage().ts == ts + 300
+
+
+@_MF
+@respx.mock
+async def test_no_coverage_is_kept_without_the_forecast():
+    """FORECAST_ENABLED off: the observation path holds nothing extra in memory."""
+    provider = MeteoFranceProvider()
+    await _render_one_frame(provider, np.full((256, 256), 65534, dtype=np.uint16))
+    assert provider.latest_coverage() is None

@@ -37,6 +37,7 @@ application sur votre téléphone.
 ## ✨ Fonctionnalités
 
 - 🌧️ **Radar de précipitations en direct** — animation des ~2 dernières heures, mise à jour en continu.
+- 🔮 **Prévision de pluie à 1 heure** — la frise continue au-delà de la dernière mesure avec la prévision immédiate de Météo-France (PIAF), toujours signalée comme une prévision ; désactivable dans les réglages (source radar Météo-France uniquement).
 - ⚡ **Foudre en temps réel** — impacts live et historiques (réseau [Blitzortung](https://www.blitzortung.org)), colorés par ancienneté.
 - 🕰️ **Archive de 90 jours** — revenez à n'importe quelle date et heure passée avec le sélecteur.
 - 🎬 **Export vidéo** — générez un court clip MP4 de la situation et partagez-le (WhatsApp, Signal…).
@@ -57,7 +58,7 @@ temps réel maison.
 
 - **Backend** — Django 6 (vues async) + PostgreSQL + Redis
 - **Frontend** — JavaScript vanilla + [Leaflet](https://leafletjs.com), sans build ni bundler
-- **Données** — [RainViewer](https://www.rainviewer.com) & [Météo-France](https://meteofrance.fr) (radar, source au choix) & [Blitzortung.org](https://www.blitzortung.org) (foudre)
+- **Données** — [RainViewer](https://www.rainviewer.com) & [Météo-France](https://meteofrance.fr) (radar, source au choix ; prévision PIAF) & [Blitzortung.org](https://www.blitzortung.org) (foudre)
 
 <details>
 <summary>🚀 Démarrage rapide (développeurs)</summary>
@@ -83,7 +84,7 @@ just pytest
 
 ## 📜 Attribution & licence
 
-- **Radar** : [RainViewer](https://www.rainviewer.com) · [Météo-France](https://meteofrance.fr) (Licence Ouverte 2.0, quand cette source est active) · **Fond de carte** : © [OpenStreetMap](https://www.openstreetmap.org/copyright) · **Foudre** : [Blitzortung.org](https://www.blitzortung.org) et contributeurs (usage **non commercial**)
+- **Radar** : [RainViewer](https://www.rainviewer.com) · [Météo-France](https://meteofrance.fr) (Licence Ouverte 2.0, quand cette source est active) · **Prévision** : [Météo-France](https://meteofrance.fr) PIAF (Licence Ouverte 2.0, avec l'heure de mise à jour) · **Fond de carte** : © [OpenStreetMap](https://www.openstreetmap.org/copyright) · **Foudre** : [Blitzortung.org](https://www.blitzortung.org) et contributeurs (usage **non commercial**)
 - Ces crédits sont obligatoires et restent affichés dans l'application.
 
 Projet sous licence **[GNU AGPL-3.0-or-later](LICENSE)**.

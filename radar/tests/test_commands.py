@@ -176,6 +176,77 @@ async def test_run_schedules_meteofrance_job_when_enabled(monkeypatch, tile_root
     assert set(jobs) == {"poll_radar", "retention_janitor", "poll_radar_meteofrance"}
 
 
+async def _capture_jobs(monkeypatch, **flags) -> dict[str, tuple]:
+    """Run the bootstrap with fakes; return each scheduled job's (callable, name) args."""
+    jobs: dict[str, tuple] = {}
+
+    class FakeScheduler:
+        def __init__(self, **_kw):
+            pass
+
+        def add_job(self, *_a, **kw):
+            jobs[kw.get("id")] = kw.get("args")
+
+        def start(self):
+            pass
+
+    class FakeEvent:
+        async def wait(self):
+            return
+
+    async def fake_poll(*_a, **_k):
+        return {"frames_seen": 0, "archived": 0, "tiles_written": 0, "ok": True}
+
+    monkeypatch.setattr(run_archiver, "AsyncIOScheduler", FakeScheduler)
+    monkeypatch.setattr(run_archiver.asyncio, "Event", FakeEvent)
+    monkeypatch.setattr(run_archiver.archiver, "poll_radar", fake_poll)
+    with override_settings(ARCHIVER_ENABLED=True, LIGHTNING_ENABLED=False, **flags):
+        await run_archiver.Command()._run()
+    return jobs
+
+
+async def test_run_schedules_the_forecast_job_when_enabled(monkeypatch, tile_root):
+    """FORECAST_ENABLED (with METEOFRANCE_ENABLED) ⇒ its own isolated job."""
+    jobs = await _capture_jobs(
+        monkeypatch,
+        METEOFRANCE_ENABLED=True,
+        METEOFRANCE_APPLICATION_ID="dGVzdA==",
+        FORECAST_ENABLED=True,
+    )
+    assert set(jobs) == {
+        "poll_radar",
+        "retention_janitor",
+        "poll_radar_meteofrance",
+        "poll_forecast",
+    }
+
+
+async def test_no_forecast_job_without_meteofrance(monkeypatch, tile_root):
+    jobs = await _capture_jobs(monkeypatch, METEOFRANCE_ENABLED=False, FORECAST_ENABLED=True)
+    assert "poll_forecast" not in jobs
+
+
+async def test_a_crashing_forecast_job_leaves_the_radar_polls_alone(monkeypatch, tile_root):
+    """The fifth failure domain: a forecast crash is swallowed by its own _safe."""
+    from radar.forecast import job as forecast_job  # noqa: PLC0415
+
+    jobs = await _capture_jobs(
+        monkeypatch,
+        METEOFRANCE_ENABLED=True,
+        METEOFRANCE_APPLICATION_ID="dGVzdA==",
+        FORECAST_ENABLED=True,
+    )
+
+    async def boom(*_a, **_k):
+        raise RuntimeError("PIAF exploded")
+
+    monkeypatch.setattr(forecast_job, "poll_forecast", boom)
+    assert await run_archiver._safe(*jobs["poll_forecast"]) is None
+    # The radar polls are separate jobs with their own _safe and still run.
+    assert (await run_archiver._safe(*jobs["poll_radar"]))["ok"] is True
+    assert (await run_archiver._safe(*jobs["poll_radar_meteofrance"]))["ok"] is True
+
+
 @override_settings(METEOFRANCE_ENABLED=False)  # only RainViewer is mocked below
 @respx.mock
 def test_seed_archive_backfills_once(tile_root, sample_weather_maps, png_bytes):

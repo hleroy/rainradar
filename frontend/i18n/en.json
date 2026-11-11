@@ -99,5 +99,12 @@
   "settings.opacity": "Rain opacity",
   "settings.source": "Radar source",
   "settings.rings": "Show alert circles on the map",
-  "settings.rings_note": "Alerts stay active either way."
+  "settings.rings_note": "Alerts stay active either way.",
+  "forecast.pill": "FORECAST",
+  "forecast.lead": "+{n} min",
+  "forecast.pill_aria": "Forecast, {n} minutes after the latest radar measurement. Back to live",
+  "forecast.tag": "Forecast",
+  "forecast.updated": "updated {time}",
+  "settings.forecast": "Show the forecast",
+  "settings.forecast_note": "Météo-France only"
 }

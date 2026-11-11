@@ -1,6 +1,10 @@
 :root {
   --panel-bg: rgba(255, 255, 255, 0.92);
   --accent: #1e66f5;
+  /* The 1-hour forecast's colour: pill, label and timeline segment. Never used on
+     the map — forecast rain is drawn with the measurement's own palette. */
+  --forecast: #6d28d9;
+  --forecast-soft: #ddd6fe;
   --shadow: 0 1px 6px rgba(0, 0, 0, 0.3);
 }
 
@@ -241,6 +245,32 @@ body {
   }
 }
 
+/* Forecast state of the same pill (radar.js renderFrameState): the cursor is past
+   the "now" tick. Two short lines ("FORECAST" over "+25 min") so the pill stays
+   about as narrow as LIVE on a phone; no dot, since nothing here is live. Still the
+   way back to live on click. */
+#controls #live-btn[data-mode="forecast"] {
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
+  padding: 0 8px;
+  line-height: 1.05;
+  letter-spacing: 0.02em;
+  background: var(--forecast);
+  color: #fff;
+}
+
+#controls #live-btn[data-mode="forecast"]::before {
+  display: none;
+}
+
+#live-lead {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+
 /* Time + date readout ("what moment am I looking at?"). */
 #time-block {
   flex: 1;
@@ -274,6 +304,16 @@ body {
 }
 
 #nodata[data-show="true"] {
+  display: inline;
+}
+
+/* The word "forecast" under the time, while a forecast frame is shown. */
+#forecast-tag {
+  display: none;
+  color: var(--forecast);
+}
+
+#forecast-tag[data-show="true"] {
   display: inline;
 }
 
@@ -389,6 +429,42 @@ body {
     rgba(155, 28, 28, 0.25) 8px
   );
   border-radius: 2px;
+}
+
+/* Forecast segment of the track: its own colour AND a dashed pattern, so it reads
+   without colour vision; the "now" tick marks the newest measurement. */
+#forecast-overlay {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 5px;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.forecast-seg {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  background: repeating-linear-gradient(
+    to right,
+    var(--forecast) 0 5px,
+    var(--forecast-soft) 5px 8px
+  );
+  border-radius: 0 3px 3px 0;
+}
+
+/* Two notches, above and below the track, clear of the 15 px thumb: in the default
+   LIVE state the thumb rests exactly on this tick, and a line through it would read
+   as a glitch. */
+.forecast-now {
+  position: absolute;
+  top: -9px;
+  width: 2px;
+  height: 23px;
+  margin-left: -1px;
+  background: linear-gradient(to bottom, #1c2430 0 3px, transparent 3px 20px, #1c2430 20px 23px);
 }
 
 /* Frame-time bubble that follows the thumb while dragging. */

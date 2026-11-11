@@ -25,6 +25,7 @@ the provider runs the whole decode-and-render in ``asyncio.to_thread``.
 
 from __future__ import annotations
 
+import functools
 import gzip
 import io
 import math
@@ -181,6 +182,26 @@ class Grid:
     _levels: list[tuple[np.ndarray, GridGeo]] | None = field(default=None, repr=False)
 
 
+@dataclass(frozen=True, eq=False)
+class Coverage:
+    """Where one observed frame had radar coverage: every cell that is not ``nodata``.
+
+    ``undetect`` (the radar looked and saw no rain) counts as covered, like rain does.
+    The provider keeps the newest frame's coverage so the PIAF forecast can be masked
+    to it (``radar.forecast.render``); it is plain data, so the observation side never
+    needs to know the forecast exists.
+    """
+
+    ts: int  # the observed frame's timestamp
+    geo: GridGeo
+    covered: np.ndarray  # bool (ysize, xsize), row 0 = north edge
+
+
+def coverage_of(grid: Grid, ts: int) -> Coverage:
+    """The radar coverage of a decoded LAME_D_EAU frame."""
+    return Coverage(ts=ts, geo=grid.geo, covered=grid.data != grid.nodata)
+
+
 # Process-wide caches: pyproj transformers per projdef, index arrays per (z,x,y,geo).
 _transformers: dict[str, pyproj.Transformer] = {}
 _index_cache: dict[tuple, tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
@@ -259,6 +280,12 @@ def parse_grid(h5_bytes: bytes) -> Grid:
         y_ul=float(y_ul),
     )
     return Grid(data=data, gain=gain, offset=offset, nodata=nodata, undetect=undetect, geo=geo)
+
+
+@functools.cache
+def _is_geographic(projdef: str) -> bool:
+    """True for a lat/lon grid (``xscale`` in degrees), False for a projected one (metres)."""
+    return pyproj.CRS.from_proj4(projdef).is_geographic
 
 
 def transformer_for(projdef: str) -> pyproj.Transformer:
@@ -476,9 +503,19 @@ def mip_level(z: int, y: int, geo: GridGeo, n_levels: int) -> int:
     scattered storms break into speckle or vanish entirely. Reducing first means
     every source cell contributes. The residual ratio is always < 2, so the final
     nearest-neighbour gather is well-conditioned.
+
+    ``xscale`` is in the grid's own units: metres for the projected observation grids,
+    degrees for the PIAF forecast's lat/lon grid. Comparing metres with degrees would
+    pick the coarsest level at every zoom, so a geographic grid is compared in
+    longitude instead — every Web-Mercator pixel spans the same 360 / (256·2^z)
+    degrees of it.
     """
-    m_per_px = _EQUATOR_M / (TILE_PX * 2**z) * math.cos(math.radians(_tile_centre_lat(z, y)))
-    ratio = m_per_px / geo.xscale
+    if _is_geographic(geo.projdef):
+        ratio = 360.0 / (TILE_PX * 2**z) / geo.xscale
+    else:
+        lat = _tile_centre_lat(z, y)
+        m_per_px = _EQUATOR_M / (TILE_PX * 2**z) * math.cos(math.radians(lat))
+        ratio = m_per_px / geo.xscale
     if ratio <= 1.0:
         return 0
     return min(int(math.log2(ratio)), n_levels - 1)
@@ -626,6 +663,19 @@ def _rain_layer(grid: Grid) -> _Layer:
 def render_frame(grid: Grid) -> dict[tuple[int, int, int], bytes | None]:
     """Render the whole computed tile matrix (sync, CPU-bound — provider threads it)."""
     return render_composite_frame(grid, None)
+
+
+def render_rate_frame(src) -> dict[tuple[int, int, int], bytes | None]:
+    """Render a ready-made rain-rate field through the rain LUT, over the whole matrix.
+
+    ``src`` carries ``field`` (float32 mm/h, NaN where there is no coverage), ``geo``
+    and a ``_levels`` memo slot — the shape of ``bufr_decode.ReflectivityGrid``. This
+    is how the PIAF forecast (:mod:`radar.forecast.render`) reuses the observation's
+    pyramid, smoothing and palette, so an observed and a forecast frame read as one
+    picture. Sync and CPU-bound, like :func:`render_frame`.
+    """
+    layers = [_layer(src, lambda: src.field, RAIN_LUT)]
+    return {(z, x, y): _encode_png(_flatten(layers, z, x, y)) for (z, x, y) in _matrix()}
 
 
 def render_composite_frame(

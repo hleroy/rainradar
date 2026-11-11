@@ -17,9 +17,8 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 // The standalone layers explainer ships as two documents on two short URLs, not as
 // one page with a switch — it is static HTML with no i18n runtime of its own.
 const EXPLAINER_URL = { fr: "/apropos", en: "/about" };
-// Provider labels are proper nouns (untranslated). These name the archive-stats
-// rows, so they stay bare — the advert's "(beta)" suffix qualifies the layer in the
-// picker, not the archive it has already accumulated.
+// Provider labels are proper nouns (untranslated); they name the archive-stats rows
+// and match the labels in the backend's providers advert.
 const PROVIDER_LABELS = { rainviewer: "RainViewer", meteofrance: "Météo-France" };
 
 export function initAbout({ t, formatDate, formatTime, currentLocale }) {

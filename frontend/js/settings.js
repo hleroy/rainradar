@@ -1,7 +1,7 @@
 // Display settings: a gear on the tool rail toggles a compact NON-modal popover —
 // the map stays visible underneath, so the rain-opacity slider previews live while
 // dragging (a modal sheet would hide exactly what the user is adjusting). Two
-// persisted, purely cosmetic preferences:
+// persisted, purely cosmetic preferences (plus the radar source and forecast rows):
 //   - rain-tile opacity   (radar.js owns the "radar_opacity" key; applied via
 //                          radar.setOpacity, and picked up by the video export)
 //   - alert warning rings (alerts.js owns the "alert_rings" key; applied via
@@ -60,6 +60,17 @@ export function initSettings({ radar, alerts, lightningEnabled }) {
       sourceRadios.appendChild(label);
     }
     sourceRow.hidden = false;
+  }
+
+  // -- 1-hour forecast -----------------------------------------------------------
+  // Shown only when the backend serves a forecast; radar.js owns the "radar_forecast"
+  // key and persists the choice inside setForecastVisible.
+  const forecastRow = document.getElementById("setting-forecast-row");
+  const forecastInput = document.getElementById("setting-forecast");
+  if (forecastRow && forecastInput && radar.forecastEnabled && radar.forecastEnabled()) {
+    forecastRow.hidden = false;
+    forecastInput.checked = radar.getForecastVisible();
+    forecastInput.addEventListener("change", () => radar.setForecastVisible(forecastInput.checked));
   }
 
   // -- warning rings ------------------------------------------------------------

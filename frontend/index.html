@@ -226,6 +226,14 @@
           aria-labelledby="setting-source-label"
         ></div>
       </div>
+      <!-- 1-hour forecast: shown only when the backend serves one; on by default. -->
+      <div class="settings-row" id="setting-forecast-row" hidden>
+        <label class="settings-check">
+          <input id="setting-forecast" type="checkbox" checked />
+          <span data-i18n="settings.forecast">Show the forecast</span>
+        </label>
+        <p class="settings-note" data-i18n="settings.forecast_note">Météo-France only</p>
+      </div>
       <div class="settings-row" id="setting-rings-row" hidden>
         <label class="settings-check">
           <input id="setting-rings" type="checkbox" checked />
@@ -248,7 +256,8 @@
           data-i18n-title="control.live"
           aria-label="Live"
         >
-          <span data-i18n="control.live">LIVE</span>
+          <span id="live-label" data-i18n="control.live">LIVE</span>
+          <span id="live-lead" hidden></span>
         </button>
         <span class="ctl-sep" aria-hidden="true"></span>
         <button id="prev-btn" type="button" data-i18n-title="control.prev" aria-label="Previous frame">
@@ -266,6 +275,7 @@
           <span id="time-sub">
             <span id="date-label" aria-live="polite"></span>
             <span id="nodata" data-show="false" role="status" aria-live="polite" data-i18n="gap.nodata">No data</span>
+            <span id="forecast-tag" data-show="false" data-i18n="forecast.tag">Forecast</span>
           </span>
         </div>
         <button id="datesheet-btn" type="button" data-i18n-title="datesheet.open" aria-label="Go to date">
@@ -280,6 +290,7 @@
         <div id="scrubber-wrap">
           <input id="scrubber" type="range" min="0" max="0" value="0" aria-label="Timeline" />
           <div id="gap-overlay" aria-hidden="true"></div>
+          <div id="forecast-overlay" aria-hidden="true"></div>
           <div id="scrub-bubble" hidden aria-hidden="true"></div>
         </div>
         <span id="scrub-end" class="scrub-lab" aria-hidden="true"></span>

@@ -253,9 +253,13 @@ export function initLightning(map, { t, onAttribution, onAttributionRemove, conf
     lastState = state;
     if (!on || !state || state.cursorTs == null) return;
     mode = state.mode;
-    // This frame's lightning slice = (previous frame, current frame].
+    // This frame's lightning slice = (previous frame, current frame]. A forecast frame
+    // is in the future: no strike belongs to it, so its slice is empty — otherwise the
+    // first one would show strikes that happened after the newest radar measurement
+    // as if they went with the forecast rain.
     sliceEnd = state.cursorTs;
-    sliceStart = state.prevTs != null ? state.prevTs : state.cursorTs - SLICE_FALLBACK_S;
+    if (state.forecast) sliceStart = sliceEnd;
+    else sliceStart = state.prevTs != null ? state.prevTs : state.cursorTs - SLICE_FALLBACK_S;
     // Live tails new strikes via SSE; archive is purely historical.
     if (mode === "live") {
       if (!es) openSSE();

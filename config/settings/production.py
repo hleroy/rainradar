@@ -122,6 +122,11 @@ METEOFRANCE_ENABLED = True
 # ...including the REFLECTIVITE wash composited under the rain. Costs a second
 # grid fetch per frame and extra tile bytes; degrades to rain-only on failure.
 METEOFRANCE_REFLECTIVITY_ENABLED = True
+# ...and the 1-hour PIAF forecast past the newest frame (radar/forecast, design doc
+# §5.6). Needs the application subscribed to the PrevisionImmediatePrecipitations API
+# on the portal; ~12 GB a day of downloads. Like the flags here, a settings constant:
+# setting it in .envs/ has no effect.
+FORECAST_ENABLED = True
 
 # Background storm alerts (Web Push) — enabled in production
 # ------------------------------------------------------------------------------
@@ -133,13 +138,14 @@ METEOFRANCE_REFLECTIVITY_ENABLED = True
 # there; see the fail-fast guard below.
 PUSH_ALERTS_ENABLED = True
 
-# Fail fast when a feature flag is enabled without its credential. All three flags
-# are set above, so both guards are live: each one's paired env secret must be
+# Fail fast when a feature flag is enabled without its credential. Every flag is
+# set above, so both guards are live: each one's paired env secret must be
 # present in .envs/.production/.django or the container refuses to start.
 require_meteofrance_credentials(
     enabled=METEOFRANCE_ENABLED,
     application_id=METEOFRANCE_APPLICATION_ID,
     reflectivity=METEOFRANCE_REFLECTIVITY_ENABLED,
+    forecast=FORECAST_ENABLED,
 )
 require_vapid_keys(
     enabled=PUSH_ALERTS_ENABLED,
