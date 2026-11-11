@@ -214,7 +214,9 @@ Decided by the maintainer on 2026-11-11.
 5. **Historical mode.** Forecast only in the live window. Past runs are not kept, so
    there is nothing to show for an archived date.
 
-### 5.1 Telling measurement from forecast (proposed, not yet confirmed)
+### 5.1 Telling measurement from forecast
+
+Confirmed by the maintainer on 2026-11-11, including the mild map transparency.
 
 The requirement: the user must always be able to tell whether the picture is measured or
 forecast. Three cues, each covering a case the others miss:
@@ -225,8 +227,8 @@ forecast. Three cues, each covering a case the others miss:
 - **State label.** The slot that shows the LIVE pill shows a forecast pill with the lead
   time ("PRÉVISION +25 min") whenever the cursor is past the tick, and the timestamp
   label carries the same word. Exposed to screen readers like the LIVE state.
-- **Map.** The forecast layer is drawn at reduced opacity, applied **client-side** on the
-  layer. This is the cue for someone watching the animation rather than the scrubber.
+- **Map.** The forecast layer is drawn at mildly reduced opacity (around 75–80 %, tuned
+  on real frames in Phase 4), applied **client-side** on the layer. This is the cue for someone watching the animation rather than the scrubber.
 
 **Forecast tiles are rendered exactly like observed tiles.** Do not bake a different
 palette, saturation or texture into them: the palette is the legend, so altering it

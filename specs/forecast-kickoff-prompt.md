@@ -77,5 +77,5 @@ dependency needs a real argument — including whether it ships a cp314 manylinu
 
 Commit the document changes on a `docs/…` branch off the current one with a Conventional
 Commit message, and **stop there** — don't open a PR and don't start Phase 1. I'll review
-the findings before we go further. The product decisions in §5 are already made; §5.1
-is still a proposal.
+the findings before we go further. The product decisions in §5, including
+the visual cues of §5.1, are already made.
