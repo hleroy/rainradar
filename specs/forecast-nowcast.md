@@ -216,24 +216,29 @@ Decided by the maintainer on 2026-11-11.
 
 ### 5.1 Telling measurement from forecast
 
-Confirmed by the maintainer on 2026-11-11, including the mild map transparency.
+Decided by the maintainer on 2026-11-11.
 
 The requirement: the user must always be able to tell whether the picture is measured or
-forecast. Three cues, each covering a case the others miss:
+forecast. Two cues:
 
 - **Timeline.** The forecast segment has its own colour *and* a pattern (hatched or
   dashed, so it does not rely on colour alone), and a "now" tick marks the boundary at
   the newest observed frame.
 - **State label.** The slot that shows the LIVE pill shows a forecast pill with the lead
   time ("PRÉVISION +25 min") whenever the cursor is past the tick, and the timestamp
-  label carries the same word. Exposed to screen readers like the LIVE state.
-- **Map.** The forecast layer is drawn at mildly reduced opacity (around 75–80 %, tuned
-  on real frames in Phase 4), applied **client-side** on the layer. This is the cue for someone watching the animation rather than the scrubber.
+  label carries the same word. Exposed to screen readers like the LIVE state. Because the
+  pill sits on the map, it is also the cue for someone watching the animation rather
+  than the scrubber.
 
-**Forecast tiles are rendered exactly like observed tiles.** Do not bake a different
-palette, saturation or texture into them: the palette is the legend, so altering it
-changes what an intensity appears to be, and a baked-in style cannot be tuned without
-re-rendering. Any map-level distinction stays a client-side presentation choice.
+**The forecast is drawn on the map exactly like a measurement.** Two things were
+considered and rejected:
+
+- **Reduced opacity on the forecast layer.** Radar opacity is already a user setting; a
+  second, automatic opacity would fight it. The forecast layer uses the user's opacity
+  unchanged.
+- **A different palette, saturation or texture baked into forecast tiles.** The palette
+  is the legend, so altering it changes what an intensity appears to be, and a baked-in
+  style cannot be tuned without re-rendering.
 
 ## 6. Phases
 
@@ -258,7 +263,7 @@ advertised; re-running a completed run fetches nothing.
 `location`, staleness rules, `sw.js` exclusion. Contract tests.
 
 **Phase 4 — frontend.** Timeline segment, LIVE semantics, attribution with run time,
-toggle (on by default), the three cues of §5.1, i18n, forecast frames excluded
+toggle (on by default), the two cues of §5.1, i18n, forecast frames excluded
 from the export.
 
 **Phase 5 — docs and rollout.** Update the design doc (fifth failure domain, §6.2, §12,
