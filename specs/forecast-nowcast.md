@@ -189,9 +189,8 @@ Cost of a 1-hour forecast: one `GetCapabilities` plus 12 `GetCoverage` per run, 
 
 **Frontend**
 
-- The timeline grows a forecast segment to the right of "now", visually distinct
-  (different track style and a "Prévision" / "Forecast" label), with later frames
-  de-emphasised to reflect §2.1.
+- The timeline grows a forecast segment to the right of "now"; how it is told apart
+  from measurements is §5.1.
 - **LIVE keeps its meaning** (§13.1): the newest *observed* frame. Playing or scrubbing
   into the forecast leaves LIVE; the refresh anchor still derives from observed frames.
 - Lightning shows nothing for future cursor positions.
@@ -200,20 +199,39 @@ Cost of a 1-hour forecast: one `GetCapabilities` plus 12 `GetCoverage` per run, 
 - i18n strings in both locales; `STATIC_SHELL` + `CACHE_VERSION` bumped if shell assets
   change.
 
-## 5. Open product decisions
+## 5. Product decisions
 
-Each has a recommended default so work is not blocked; confirm or override.
+Decided by the maintainer on 2026-11-11.
 
-1. **Which radar source shows the forecast?** Recommended: Météo-France source only in
-   v1. RainViewer tiles use a different palette, so the observed → forecast boundary
-   would change colour scale mid-animation.
-2. **Horizon.** Recommended: 60 min, as a setting. PIAF goes to 180 min, but past the
-   switch to AROME-PI the documented flicker and zone seams appear.
-3. **Opt-in or default?** Recommended: a toggle, off by default for the first release.
-4. **Video export.** Recommended: exclude forecast frames in v1; if included later, every
-   forecast frame must burn in a "forecast" label next to the UTC timestamp.
-5. **Historical mode.** Recommended: forecast only in the live window. Past runs are not
-   kept, so there is nothing to show for an archived date.
+1. **Which radar source shows the forecast?** The Météo-France source only. RainViewer
+   tiles use a different palette, so the observed → forecast boundary would change colour
+   scale mid-animation.
+2. **Horizon.** 60 min, as a setting. PIAF goes to 180 min, but past the switch to
+   AROME-PI the documented flicker and zone seams appear.
+3. **Toggle.** A user toggle, **on by default**.
+4. **Video export.** Forecast frames are excluded. If that ever changes, every forecast
+   frame must burn in a "forecast" label next to the UTC timestamp.
+5. **Historical mode.** Forecast only in the live window. Past runs are not kept, so
+   there is nothing to show for an archived date.
+
+### 5.1 Telling measurement from forecast (proposed, not yet confirmed)
+
+The requirement: the user must always be able to tell whether the picture is measured or
+forecast. Three cues, each covering a case the others miss:
+
+- **Timeline.** The forecast segment has its own colour *and* a pattern (hatched or
+  dashed, so it does not rely on colour alone), and a "now" tick marks the boundary at
+  the newest observed frame.
+- **State label.** The slot that shows the LIVE pill shows a forecast pill with the lead
+  time ("PRÉVISION +25 min") whenever the cursor is past the tick, and the timestamp
+  label carries the same word. Exposed to screen readers like the LIVE state.
+- **Map.** The forecast layer is drawn at reduced opacity, applied **client-side** on the
+  layer. This is the cue for someone watching the animation rather than the scrubber.
+
+**Forecast tiles are rendered exactly like observed tiles.** Do not bake a different
+palette, saturation or texture into them: the palette is the legend, so altering it
+changes what an intensity appears to be, and a baked-in style cannot be tuned without
+re-rendering. Any map-level distinction stays a client-side presentation choice.
 
 ## 6. Phases
 
@@ -238,7 +256,8 @@ advertised; re-running a completed run fetches nothing.
 `location`, staleness rules, `sw.js` exclusion. Contract tests.
 
 **Phase 4 — frontend.** Timeline segment, LIVE semantics, attribution with run time,
-toggle, i18n, export behaviour per decision 4.
+toggle (on by default), the three cues of §5.1, i18n, forecast frames excluded
+from the export.
 
 **Phase 5 — docs and rollout.** Update the design doc (fifth failure domain, §6.2, §12,
 §13, §14), `CLAUDE.md` non-negotiables, README, and the `deploy` skill's dark-flag
