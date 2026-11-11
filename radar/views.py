@@ -32,6 +32,7 @@ from radar import metrics as metrics_text
 from radar import stats as stats_mod
 from radar import storage
 from radar import tiles
+from radar.forecast.advert import forecast_advert
 from radar.lightning import get_active_source as get_active_lightning_source
 from radar.logging_json import emit
 from radar.models import ArchiveGap
@@ -48,7 +49,7 @@ logger = logging.getLogger("radar.views")
 IMMUTABLE_CACHE = "public, max-age=31536000, immutable"
 
 # Human labels for the frames `providers` advert — proper nouns, not localized.
-_PROVIDER_LABELS = {"rainviewer": "RainViewer", "meteofrance": "Météo-France (beta)"}
+_PROVIDER_LABELS = {"rainviewer": "RainViewer", "meteofrance": "Météo-France"}
 
 # The JSON API responses carry no content hash, so a browser must never reuse one
 # without checking back. ``@no_cache`` (Cache-Control: no-cache) lets the response
@@ -137,7 +138,8 @@ async def _frames_live(provider) -> HttpResponse:
             return JsonResponse({"error": "frames_unavailable"}, status=503)
         ts_list = [f.timestamp for f in frame_list]
 
-    resp = _frames_response(provider, ts_list, gaps)
+    forecast = await forecast_advert(provider.name, ts_list, now)
+    resp = _frames_response(provider, ts_list, gaps, forecast)
     with contextlib.suppress(Exception):  # caching is best-effort
         await cache.set_bytes(live_key, resp.content, settings.FRAMES_LIVE_CACHE_TTL)
     return resp
@@ -156,10 +158,12 @@ async def _frames_historical(provider, raw_from, raw_to) -> JsonResponse:
         gaps = await _gaps_overlapping(provider.name, t_from, t_to)
     except Exception:  # noqa: BLE001 — DB unreachable for an archive query
         return JsonResponse({"error": "archive_unavailable"}, status=503)
-    return _frames_response(provider, ts_list, gaps)
+    # No forecast for an archived range: past runs are not kept (forecast-nowcast §5).
+    forecast = await forecast_advert(None, ts_list, int(time.time()))
+    return _frames_response(provider, ts_list, gaps, forecast)
 
 
-def _frames_response(provider, ts_list, gaps) -> JsonResponse:
+def _frames_response(provider, ts_list, gaps, forecast: dict) -> JsonResponse:
     return JsonResponse(
         {
             "frames": [{"timestamp": ts} for ts in ts_list],
@@ -190,6 +194,12 @@ def _frames_response(provider, ts_list, gaps) -> JsonResponse:
                     "vapid_public_key": settings.VAPID_PUBLIC_KEY,
                 },
             },
+            # Additive forecast advert (radar.forecast.advert): the newest published
+            # run's frames that are still worth showing, past the newest observed
+            # frame. `enabled` reflects FORECAST_ENABLED; `frames` is empty for another
+            # provider, a historical range, or a stale/missing run. Tiles live at
+            # `{tile_base}/{valid_ts}/{z}/{x}/{y}.png`.
+            "forecast": forecast,
         },
     )
 
@@ -480,6 +490,53 @@ async def tile(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0917 — coords + t
     _emit_tile_fallback(provider, ts, z, x, y, "fetched", logging.INFO)
     resp = HttpResponse(data, content_type="image/png")
     resp["Cache-Control"] = IMMUTABLE_CACHE
+    return resp
+
+
+# -- forecast tile ------------------------------------------------------------
+
+
+def _open_forecast_tile(run: int, valid: int, z: int, x: int, y: int):
+    """``(handle, None)`` for a tile on disk, else ``(None, frame_done)`` (sync)."""
+    try:
+        return storage.forecast_tile_path(run, valid, z, x, y).open("rb"), None
+    except OSError:
+        return None, storage.forecast_frame_done(run, valid)
+
+
+async def forecast_tile(
+    _request: HttpRequest,
+    run: int,
+    valid: int,
+    z: int,
+    x: int,
+    y: int,
+) -> HttpResponse:
+    """GET /forecast/{run}/{valid}/{z}/{x}/{y}.png — disk only, never upstream.
+
+    Prod Nginx serves the files and sends only misses here; dev serves everything.
+    A URL names one (run, valid) pair, and a frame is never rewritten once its
+    ``.done`` marker exists, so both a tile and "no tile" are ``immutable``. The job
+    writes only non-empty tiles, so a miss in a done frame is the 204 empty answer.
+    Anything else — a pruned run, a frame still arriving, a tile off the matrix — is
+    a 404 nobody may cache: the advert only ever names frames that are done.
+    """
+    if not settings.FORECAST_ENABLED:
+        return HttpResponse(status=404)
+    matrix = tiles.matrix_frozenset(
+        tuple(settings.RADAR_BBOX),
+        settings.RADAR_ZOOM_MIN,
+        settings.RADAR_ZOOM_MAX,
+    )
+    if (z, x, y) not in matrix:
+        return HttpResponse(status=404)
+    handle, frame_done = await sync_to_async(_open_forecast_tile)(run, valid, z, x, y)
+    if handle is not None:
+        return _tile_file_response(handle)
+    if frame_done:
+        return _tile_no_content()
+    resp = HttpResponse(status=404)
+    resp["Cache-Control"] = "no-store"
     return resp
 
 

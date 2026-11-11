@@ -1,6 +1,6 @@
 ---
 name: deploy
-description: Deploy Rain Radar to production, or work on production config. Covers the tag-triggered CD webhook, what "deploy" means as a maintainer instruction (cut a vX.Y.Z version via workflow_dispatch), rollbacks, the manual bring-up/recovery fallback, the production service topology, how to enable the dark feature flags (METEOFRANCE_ENABLED, METEOFRANCE_REFLECTIVITY_ENABLED, PUSH_ALERTS_ENABLED), and how to rotate the Météo-France credential (OAuth2 only — never an API key) and restart the containers that read it.
+description: Deploy Rain Radar to production, or work on production config. Covers the tag-triggered CD webhook, what "deploy" means as a maintainer instruction (cut a vX.Y.Z version via workflow_dispatch), rollbacks, the manual bring-up/recovery fallback, the production service topology, how to enable the dark feature flags (METEOFRANCE_ENABLED, METEOFRANCE_REFLECTIVITY_ENABLED, PUSH_ALERTS_ENABLED, FORECAST_ENABLED — the 1-hour PIAF forecast), and how to rotate the Météo-France credential (OAuth2 only — never an API key) and restart the containers that read it.
 ---
 
 # Deploying Rain Radar
@@ -98,3 +98,54 @@ A bad *value* (well-formed but wrong) boots fine and fails later at the token
 endpoint: look for `Météo-France token endpoint -> HTTP 401` in the archiver logs, and
 for Météo-France frames advancing on the site. **Never** echo the variable, the token,
 or the logs' surrounding secrets into a shell transcript or an issue.
+
+## Enabling the 1-hour forecast (`FORECAST_ENABLED`)
+
+The PIAF forecast (`radar/forecast/`, design doc §5.6) is **on in production** and
+dark everywhere else, dev included. `FORECAST_ENABLED` is a settings constant, so
+turning it on or off is a code change plus a release — putting it in `.envs/` is
+silently ignored.
+
+**Before enabling:**
+
+- The Météo-France application whose `METEOFRANCE_APPLICATION_ID` production uses must
+  be **subscribed to the *PrevisionImmediatePrecipitations* API** on the portal
+  ("Souscrire à l'API gratuitement") — a manual step, separate from the DPRadar
+  subscription. No new credential: one OAuth2 token serves both APIs. Without the
+  subscription PIAF answers `403` (code `900908`), which shows up as
+  `forecast_run_failed` with `reason=fetch_failed` in the archiver logs.
+- **Bandwidth: ~12 GB a day** of downloads (13 × 3.2 MB per run, a run every 5 min;
+  the server does not compress). Disk is a few tens of MB under `/data/forecast`, on the
+  tile volume `django`, `archiver` and `nginx` already mount — no compose change.
+- It requires `METEOFRANCE_ENABLED` (already `True` in production); without it, settings
+  import raises `ImproperlyConfigured`.
+
+**Enable:** in `config/settings/production.py`, delete the `from .base import
+FORECAST_ENABLED` line (it only exists so the guard can read base's default) and set
+`FORECAST_ENABLED = True` next to the Météo-France block. Then
+deploy as usual (cut a version). Nothing else: the archiver schedules `poll_forecast`,
+the web container starts advertising frames, and the frontend shows the timeline
+segment and the settings toggle on its own.
+
+**Verify** (the first run lands ~9–10 min after the archiver starts):
+
+```bash
+docker compose -f docker-compose.production.yml logs archiver | grep forecast_published   # run, frames=13, lag_s≈545
+curl -s https://rainradar.hleroy.com/metrics | grep '^forecast_'                           # run timestamp advancing every 5 min
+curl -s 'https://rainradar.hleroy.com/api/radar/frames?provider=meteofrance' | jq .forecast  # ~12 frames, tile_base set
+```
+
+`forecast_rejected_total`, `forecast_fetch_failed_total` and `forecast_crashed_total`
+should stay flat;
+`forecast_not_ready_total` rising by ~3 per run is the normal discovery probe. A
+`forecast_run_timestamp` more than 20 min old means the advert has gone empty.
+
+**Token caveat.** Minting a Météo-France token usually revokes the application's
+previous one. Running the forecast (or anything that mints) locally with the
+**production** credential therefore knocks out production's token; the 401 →
+invalidate → retry path recovers, but keep such local runs short.
+
+**Roll back:** set it back to `False` and deploy. The advert
+empties at once; no database or Redis cleanup is needed. The leftover runs can be
+removed with
+`docker compose -f docker-compose.production.yml exec archiver rm -rf /data/forecast`.

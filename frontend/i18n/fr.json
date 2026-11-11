@@ -99,5 +99,12 @@
   "settings.opacity": "Opacité de la pluie",
   "settings.source": "Source du radar",
   "settings.rings": "Afficher les cercles d'alerte sur la carte",
-  "settings.rings_note": "Les alertes restent actives dans tous les cas."
+  "settings.rings_note": "Les alertes restent actives dans tous les cas.",
+  "forecast.pill": "PRÉVISION",
+  "forecast.lead": "+{n} min",
+  "forecast.pill_aria": "Prévision, {n} minutes après la dernière mesure radar. Revenir au direct",
+  "forecast.tag": "Prévision",
+  "forecast.updated": "mise à jour {time}",
+  "settings.forecast": "Afficher la prévision",
+  "settings.forecast_note": "Uniquement avec Météo-France"
 }

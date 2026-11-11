@@ -586,8 +586,8 @@ async def test_frames_advert_lists_both_when_enabled(async_client):
     advert = (await async_client.get("/api/radar/frames")).json()["providers"]
     assert [p["name"] for p in advert] == ["rainviewer", "meteofrance"]
     mf = next(p for p in advert if p["name"] == "meteofrance")
-    # Proper noun, not localized; the beta suffix rides along in the same advert.
-    assert mf["label"] == "Météo-France (beta)"
+    # Proper noun, not localized — and no longer "(beta)".
+    assert mf["label"] == "Météo-France"
     assert mf["frame_interval"] == settings.METEOFRANCE_FRAME_INTERVAL
     assert "Licence Ouverte" in mf["attribution"]
 

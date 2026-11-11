@@ -520,22 +520,29 @@ def test_radar_js_follows_the_live_edge_on_refresh():
     """
     radar = _read("js", "radar.js")
     assert "let following = true;" in radar
-    # Following ⇒ jump to the frame that just landed.
-    assert re.search(r"if \(following\) \{\s*showFrame\(frames\.length - 1\);", radar)
+    # Following ⇒ jump to the frame that just landed — the newest *measured* frame;
+    # the forecast frames appended after it are never the live edge.
+    assert re.search(r"if \(following && measured\) \{\s*showFrame\(observedCount - 1\);", radar)
+    # …but only when a measurement landed: a forecast run alone must not yank a
+    # replay back to "now" (runs arrive out of phase with measurements).
+    assert "const measured = newest !== prevNewest;" in radar
     # Not following ⇒ keep the user's chosen frame, and rejoin the edge only once
     # it has aged out of the window (findIndex miss).
     assert "const idx = frames.findIndex((f) => f.timestamp === shownTs);" in radar
-    assert re.search(r"setFollowing\(true\);\s*showFrame\(frames\.length - 1\);", radar)
+    assert re.search(r"setFollowing\(true\);\s*showFrame\(observedCount - 1\);", radar)
 
 
 def test_radar_js_live_pill_reflects_the_live_edge():
     """The pill may only claim LIVE while the cursor is at the newest frame."""
     radar = _read("js", "radar.js")
-    # setFollowing is the single writer for the pill, so the two cannot disagree.
-    assert 'setLiveButton(mode === "live" && following);' in radar
-    # Deliberate cursor moves (scrub + both step buttons) drop it / re-arm it.
+    # setFollowing re-renders the pill from the state, so the two cannot disagree.
+    single_writer = r"function setFollowing\(v\) \{\s*following = v;\s*renderFrameState\(\);"
+    assert re.search(single_writer, radar)
+    assert 'const active = mode === "live" && following;' in radar
+    # Deliberate cursor moves (scrub + both step buttons) drop it / re-arm it; the
+    # edge is the newest measurement, so stepping into the forecast leaves LIVE.
     assert radar.count("syncFollowing()") >= 3
-    assert "setFollowing(position === frames.length - 1);" in radar
+    assert "setFollowing(position === observedCount - 1);" in radar
     # State reaches screen readers too, not just the blinking dot.
     assert 'liveBtn.setAttribute("aria-pressed"' in radar
 
@@ -581,7 +588,7 @@ def test_radar_js_keeps_the_picture_up_across_a_live_refresh():
     radar = _read("js", "radar.js")
     assert "retainCurrentLayer(); // keep the picture up until the new frame is ready" in radar
     assert re.search(
-        r"function retainCurrentLayer\(\) \{\s*for \(const \[ts, layer\] of layerCache\) \{"
+        r"function retainCurrentLayer\(\) \{\s*for \(const \[key, layer\] of layerCache\) \{"
         r"\s*if \(layer === currentLayer\) continue;",
         radar,
     )
@@ -590,16 +597,19 @@ def test_radar_js_keeps_the_picture_up_across_a_live_refresh():
     assert "function clearLayers()" in radar
 
 
-def test_radar_js_caches_tile_layers_by_timestamp():
-    """Layer identity is the frame timestamp, not the scrubber position.
+def test_radar_js_caches_tile_layers_by_url():
+    """Layer identity is the frame's tile URL, not the scrubber position.
 
     A live refresh replaces the frame list and every position shifts under it, so a
     position-keyed cache cannot survive the swap — which is why it used to be thrown
-    away wholesale.
+    away wholesale. Not the timestamp either: a time is first forecast, then measured,
+    with different tiles, and one must never be served for the other.
     """
     radar = _read("js", "radar.js")
-    assert "const layerCache = new Map(); // frame timestamp -> L.TileLayer" in radar
-    assert "layerCache.set(ts, layer);" in radar
+    assert "const layerCache = new Map(); // frame tile URL -> L.TileLayer" in radar
+    assert "const frameUrl = (f) => f.url || tileUrl(f.timestamp);" in radar
+    assert "layerCache.set(key, layer);" in radar
+    assert "layerCache.set(ts, layer);" not in radar
     assert "layerCache.set(position, layer);" not in radar
     assert "layerCache.get(position)" not in radar
 
@@ -1181,3 +1191,124 @@ def test_sw_shell_includes_localtime():
     sw = _read("sw.js")
     assert '"/static/js/localtime.js"' in sw
     assert 'CACHE_VERSION = "v26"' not in sw  # shell changed (new module + picker files)
+
+
+# -- the 1-hour forecast (forecast-nowcast.md §5, §5.1; design doc §13.10) -
+
+
+def test_forecast_i18n_parity():
+    en = json.loads(_read("i18n", "en.json"))
+    fr = json.loads(_read("i18n", "fr.json"))
+    keys = {
+        "forecast.pill",
+        "forecast.lead",
+        "forecast.pill_aria",
+        "forecast.tag",
+        "forecast.updated",
+        "settings.forecast",
+        "settings.forecast_note",
+    }
+    for lang, d in (("en", en), ("fr", fr)):
+        assert keys <= d.keys(), f"{lang} lacks {keys - d.keys()}"
+        assert "{n}" in d["forecast.lead"]
+        assert "{n}" in d["forecast.pill_aria"]
+        assert "{time}" in d["forecast.updated"]
+    assert fr["forecast.pill"] == "PRÉVISION"
+
+
+def test_radar_js_appends_the_forecast_after_the_measurements_in_live_only():
+    radar = _read("js", "radar.js")
+    # From the backend advert only, on our own run-scoped path — never upstream.
+    assert "setFrames((data && data.frames) || [], data && data.forecast);" in radar
+    assert "url: `${forecast.tile_base}/${f.timestamp}/{z}/{x}/{y}.png`," in radar
+    for host in ("meteofrance.fr", "piaf"):
+        assert host not in radar.lower(), host
+    # Live mode and the user's toggle only, strictly after the newest measurement.
+    gate = 'mode === "live" && forecastOn && newest != null && forecast && forecast.tile_base'
+    assert gate in radar
+    assert ".filter((f) => f.timestamp > newest)" in radar
+    assert "frames = observed.concat(extra);" in radar
+
+
+def test_radar_js_live_still_means_the_newest_measurement():
+    radar = _read("js", "radar.js")
+    # The refresh anchor and the "did a frame land?" test ignore the forecast…
+    assert "const newest = newestObservedTs(); // the forecast never moves the" in radar
+    assert "const prevNewest = newestObservedTs();" in radar
+    # …but a new forecast run alone is still picked up.
+    assert "if (!measured && !newRun) return;" in radar
+    # Load and LIVE land on the newest measurement, not on the forecast's end.
+    assert radar.count("if (observedCount) showFrame(observedCount - 1);") == 2
+    # Gaps are holes in measurements; an ongoing one never shades the forecast.
+    assert "if (f.forecast) return false;" in radar
+    assert "const openEnd = newestObservedTs() ?? hi;" in radar
+
+
+def test_radar_js_tells_forecast_from_measurement():
+    """§5.1: the pill, the word under the time, and the timeline segment."""
+    radar = _read("js", "radar.js")
+    assert 'liveBtn.dataset.mode = "forecast";' in radar
+    assert 'liveBtn.setAttribute("aria-pressed", "false");' in radar
+    assert 'const aria = t("forecast.pill_aria").replace("{n}", String(lead));' in radar
+    assert 'liveBtn.setAttribute("aria-label", aria);' in radar
+    assert "(f.timestamp - newestObservedTs()) / 60" in radar  # lead from the "now" tick
+    assert 'forecastTag.dataset.show = lead != null ? "true" : "false";' in radar
+    assert 'seg.className = "forecast-seg";' in radar
+    assert 'tick.className = "forecast-now";' in radar
+    assert "refreshI18n: () => renderFrameState()," in radar
+    assert "radar.refreshI18n();" in _read("js", "main.js")
+
+
+def test_forecast_markup_and_style():
+    html = _read("index.html")
+    assert '<span id="live-label" data-i18n="control.live">LIVE</span>' in html
+    assert '<span id="live-lead" hidden></span>' in html
+    assert 'id="forecast-tag" data-show="false" data-i18n="forecast.tag"' in html
+    assert '<div id="forecast-overlay" aria-hidden="true"></div>' in html
+    css = _read("css", "app.css")
+    assert '#controls #live-btn[data-mode="forecast"]' in css
+    # Its own colour AND a pattern, so the segment does not rely on colour alone.
+    seg = re.search(r"\.forecast-seg \{(.*?)\n\}", css, re.DOTALL)
+    assert seg
+    assert "repeating-linear-gradient" in seg.group(1)
+    assert "var(--forecast)" in seg.group(1)
+
+
+def test_forecast_credit_carries_the_run_time():
+    """Licence Ouverte: the source AND the date of last update, while a forecast shows."""
+    radar = _read("js", "radar.js")
+    assert 't("forecast.updated").replace("{time}", formatTime(forecast.run))' in radar
+    remove = "if (forecastCredit && onAttributionRemove) onAttributionRemove(forecastCredit);"
+    assert remove in radar
+    assert "if (credit && onAttribution) onAttribution(credit);" in radar
+    assert "lead != null && forecast && forecast.attribution" in radar
+
+
+def test_forecast_toggle_is_on_by_default_and_gated():
+    radar = _read("js", "radar.js")
+    assert 'return localStorage.getItem("radar_forecast") !== "0";' in radar
+    assert 'localStorage.setItem("radar_forecast", forecastOn ? "1" : "0");' in radar
+    html = _read("index.html")
+    row = re.search(
+        r'<div class="settings-row" id="setting-forecast-row" hidden>(.*?)</div>', html, re.DOTALL
+    )
+    assert row, "forecast settings row must ship hidden"
+    assert '<input id="setting-forecast" type="checkbox" checked />' in row.group(1)
+    settings_js = _read("js", "settings.js")
+    assert "radar.forecastEnabled && radar.forecastEnabled()" in settings_js
+    assert "radar.setForecastVisible(forecastInput.checked)" in settings_js
+
+
+def test_forecast_frames_are_never_exported_nor_given_lightning():
+    radar = _read("js", "radar.js")
+    assert "frames: frames.filter((f, i) => !f.forecast && !inGap(i))," in radar
+    clamp = "cursorTs: isForecast(position) ? newestObservedTs() : frames[position]?.timestamp,"
+    assert clamp in radar
+    assert "rangeTo: newestObservedTs() ?? undefined," in radar
+    lightning = _read("js", "lightning.js")
+    assert "if (state.forecast) sliceStart = sliceEnd;" in lightning
+
+
+def test_sw_cache_version_bumped_for_forecast_ui():
+    # Shell changed: radar.js, lightning.js, settings.js, main.js, css, html, i18n.
+    assert 'CACHE_VERSION = "v27"' not in _read("sw.js")

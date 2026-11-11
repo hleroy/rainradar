@@ -104,6 +104,22 @@ class Command(BaseCommand):
                 coalesce=True,
                 max_instances=1,
             )
+        if mf_provider is not None and settings.FORECAST_ENABLED:
+            # The 1-hour forecast: a fifth failure domain, its own job and its own
+            # _safe. It shares mf_provider for the token holder (a second one would
+            # revoke this one's token) and for the newest observed coverage it masks
+            # the forecast to; it never calls into the observation poll.
+            from radar.forecast import job as forecast_job  # noqa: PLC0415
+
+            scheduler.add_job(
+                _safe,
+                IntervalTrigger(seconds=settings.FORECAST_POLL_INTERVAL),
+                args=(lambda: forecast_job.poll_forecast(mf_provider), "poll_forecast"),
+                id="poll_forecast",
+                misfire_grace_time=settings.FORECAST_POLL_INTERVAL,
+                coalesce=True,
+                max_instances=1,
+            )
         if settings.LIGHTNING_ENABLED:
             # Pre-create months N+1/N+2 daily so an insert never falls through to
             # the DEFAULT partition on the 1st. Idempotent.

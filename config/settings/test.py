@@ -52,12 +52,22 @@ RADAR_ZOOM_MAX = 7
 # itself override this back to a non-zero value.
 UPSTREAM_TILE_MIN_INTERVAL = 0.0
 
-# Fail-fast guards (METEOFRANCE_ENABLED and PUSH_ALERTS_ENABLED are False
-# in base + test, so these will pass — kept for consistency).
+# REDIS — a database of its own (base uses /0). The suite flushes Redis before every
+# test, and a dev stack running alongside writes live state there (the archiver's
+# forecast pointer, frame caches): sharing /0 made tests flaky and wiped the dev cache.
+REDIS_URL = "redis://redis:6379/1"
+
+# FORECAST — pinned off, whatever base.py ships: it requires METEOFRANCE_ENABLED,
+# which is off here, and the tests that need it switch both on themselves.
+FORECAST_ENABLED = False
+
+# Fail-fast guards (METEOFRANCE_ENABLED and PUSH_ALERTS_ENABLED are False in base,
+# FORECAST_ENABLED is pinned False above, so these pass — kept for consistency).
 require_meteofrance_credentials(
     enabled=METEOFRANCE_ENABLED,
     application_id=METEOFRANCE_APPLICATION_ID,
     reflectivity=METEOFRANCE_REFLECTIVITY_ENABLED,
+    forecast=FORECAST_ENABLED,
 )
 require_vapid_keys(
     enabled=PUSH_ALERTS_ENABLED,

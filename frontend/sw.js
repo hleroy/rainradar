@@ -4,8 +4,8 @@
 //
 // Non-negotiables (see CLAUDE.md):
 //   - GET-only, same-origin-only. It NEVER calls respondWith for `/api/…`,
-//     `/tiles/…`, the lightning SSE (`/api/lightning/stream`), or the cross-origin
-//     OSM base — those always hit the network, exactly as before. No new upstream
+//     `/tiles/…`, `/forecast/…`, the lightning SSE (`/api/lightning/stream`), or
+//     the cross-origin OSM base — those always hit the network. No new upstream
 //     request, no contact with tilecache.rainviewer.com or Blitzortung.
 //   - App-shell-only cache. When a shell asset is added/renamed, bump BOTH
 //     STATIC_SHELL below AND CACHE_VERSION; old caches are pruned on `activate`.
@@ -13,7 +13,7 @@
 //     on `controllerchange` (main.js), never on first install, and deferred while a
 //     video export is mid-render.
 
-const CACHE_VERSION = "v27"; // bump on every release that changes shell assets
+const CACHE_VERSION = "v28"; // bump on every release that changes shell assets
 const CACHE_NAME = `rainradar-shell-${CACHE_VERSION}`;
 
 // Explicit (no build manifest exists — vanilla ES modules, no hashing). Every entry
@@ -58,6 +58,9 @@ const STATIC_SHELL = [
   "/static/img/apropos-mini-eclairs.webp",
 ];
 
+// Same-origin data paths the fetch handler must never touch (see the header).
+const DATA_PATHS = ["/api/", "/tiles/", "/forecast/"];
+
 self.addEventListener("install", (event) => {
   self.skipWaiting(); // silent auto-update: take over without waiting
   event.waitUntil(
@@ -90,9 +93,10 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return; // OSM & any cross-origin: never
 
-  // Never intercept data paths — radar tiles, JSON API, lightning SSE/history. They
-  // must reach the network unchanged (the SSE stream must stay unbuffered/uncached).
-  if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/tiles/")) return;
+  // Never intercept data paths — radar and forecast tiles, JSON API, lightning
+  // SSE/history. They must reach the network unchanged (the SSE stream must stay
+  // unbuffered/uncached; forecast runs are superseded every 5 minutes).
+  if (DATA_PATHS.some((prefix) => url.pathname.startsWith(prefix))) return;
 
   // Navigations (the shell document): network-first, fall back to the cached "/".
   // The explainer (/apropos, and its English twin /about) is a document of its own,

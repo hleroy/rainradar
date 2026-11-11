@@ -150,3 +150,30 @@ async def test_metrics_provider_labels_both_when_enabled(async_client):
     assert values['radar_last_poll_timestamp{provider="meteofrance"}'] == "222"
     # The unlabelled series stays for dashboard continuity.
     assert "radar_last_poll_timestamp" in values
+
+
+async def test_forecast_series_only_with_the_flag(async_client):
+    values = _parse((await async_client.get("/metrics")).content.decode())
+    assert not any(name.startswith("forecast_") for name in values)
+
+
+@override_settings(FORECAST_ENABLED=True)
+async def test_forecast_series(async_client):
+    await cache.set_forecast_current({"run": 1794395700, "published_at": 1794396250})
+    await cache.incr_forecast("not_ready", 3)
+    await cache.incr_forecast("bytes", 42_000_000)
+    values = _parse((await async_client.get("/metrics")).content.decode())
+
+    assert values["forecast_run_timestamp"] == "1794395700"
+    assert values["forecast_publication_lag_seconds"] == "550"
+    assert values["forecast_not_ready_total"] == "3"
+    assert values["forecast_bytes_total"] == "42000000"
+    assert values["forecast_rejected_total"] == "0"
+    assert values["forecast_crashed_total"] == "0"
+
+
+@override_settings(FORECAST_ENABLED=True)
+async def test_forecast_series_before_any_run(async_client):
+    values = _parse((await async_client.get("/metrics")).content.decode())
+    assert values["forecast_run_timestamp"] == "0"
+    assert values["forecast_publication_lag_seconds"] == "0"

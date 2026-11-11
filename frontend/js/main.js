@@ -116,6 +116,7 @@ async function main() {
   document.getElementById("lang-toggle").addEventListener("click", async () => {
     await toggleLang();
     updateLangToggle();
+    radar.refreshI18n(); // re-translate the pill / forecast label / forecast credit
     lightning.refreshI18n(); // re-translate the legend + toggle (built in JS)
     about.refreshI18n(); // re-translate the dialog's JS-built prose + stats
     dateNav.refreshI18n(); // re-render the calendar's locale month/weekday labels

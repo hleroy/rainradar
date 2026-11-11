@@ -6,7 +6,7 @@ Guidance for working in this repo. Read this first.
 
 Rain Radar — a live precipitation radar webapp for France (OpenStreetMap base +
 animated radar overlay, a live ~2h replay timeline, a **90-day on-disk archive**,
-and a **live + historical lightning layer**).
+a **live + historical lightning layer**, and a flag-gated **1-hour rain forecast**).
 **License: AGPL-3.0-or-later.**
 
 For what's shipped and how the pieces fit, read [`README.md`](README.md) and the
@@ -24,8 +24,8 @@ fix the document in the same PR.
 ## Layout
 
 `config/` is the Django project; `radar/` is the single app (`providers/`,
-`lightning/`, and `alerts/` are the three data-source / failure-domain isolation
-boundaries — see Non-negotiables); `frontend/` is vanilla ES2020 + vendored Leaflet
+`lightning/`, `alerts/` and `forecast/` are the four data-source / failure-domain
+isolation boundaries — see Non-negotiables); `frontend/` is vanilla ES2020 + vendored Leaflet
 with no build step; `compose/` holds the Dockerfiles and nginx/postgres config.
 `.claude/` holds the agent skills plus the SessionStart hook that provisions the
 real 3.14 toolchain for Claude Code on the web (see Commands).
@@ -77,11 +77,12 @@ So, in an environment whose ambient Python is older (Claude Code on the web ship
 
 ## Non-negotiables (don't regress these)
 
-- **The browser must NEVER call `tilecache.rainviewer.com`, the Météo-France API,
-  or Blitzortung directly.** All radar tiles (both providers) are archived/proxied by
-  the backend and served from `/tiles/{provider}/{date}/{ts}/{z}/{x}/{y}.png`
-  (Nginx-static in prod, Django fallback for misses); the Météo-France API base + token
-  endpoint are backend-only; lightning reaches the browser only via our SSE + history
+- **The browser must NEVER call `tilecache.rainviewer.com`, the Météo-France APIs
+  (DPRadar or PIAF), or Blitzortung directly.** All radar tiles (both providers) are
+  archived/proxied by the backend and served from
+  `/tiles/{provider}/{date}/{ts}/{z}/{x}/{y}.png`, forecast tiles from
+  `/forecast/{run}/{valid}/{z}/{x}/{y}.png` (Nginx-static in prod, Django fallback for
+  misses); the Météo-France API bases + token endpoint are backend-only; lightning reaches the browser only via our SSE + history
   endpoints. The frontend only ever references our own paths.
 - **Provider abstraction:** views/cache never know which radar provider is active. New
   radar sources go behind `RadarProvider` (`radar/providers/`). Météo-France is a
@@ -105,6 +106,27 @@ So, in an environment whose ambient Python is older (Claude Code on the web ship
   signed-off palette reuses the rain LUT's own warm low stops, so the composite reads as
   one continuous ramp — never describe the wash in UI copy as a distinct measurement, and
   never let it drive an alert.
+- **The 1-hour forecast is a fifth failure domain, archiver-only, flag-gated, and not
+  a `RadarProvider`.** `radar/forecast/` fetches Météo-France PIAF in its own job
+  (`poll_forecast`, scheduled only when `FORECAST_ENABLED` **and**
+  `METEOFRANCE_ENABLED`); its failures stop at that job and never touch either radar
+  poll, lightning or alerts. It writes no DB rows, and its tiles live under
+  `FORECAST_ROOT`, **never** `TILE_ROOT` (keyed by run *and* valid time, so each URL is
+  `immutable`; the job prunes its own runs, the janitor never sees them). Load-bearing
+  rules: it uses **the Météo-France provider's own `MeteoFranceAuth` instance** — a
+  second instance revokes the first's token; run discovery probes the run clock (404 =
+  not yet, never a failure) and never reads coverage IDs from upstream XML; the GRIB
+  decoder pins centre, templates, grid, run and valid time and **does not believe the
+  labels** (the field is mm per 5 min, converted ×12, whatever the metadata says); the
+  render is **masked to the newest observed `LAME_D_EAU` coverage**; a run is
+  published (`run.json`, then `forecast:current`) only after every frame is on disk.
+  The `forecast` advert drops stale runs, measured times and anything past the
+  horizon, and degrades to no frames, never to a failed `/api/radar/frames`. In the
+  UI, **LIVE still means the newest measured frame**; the forecast is drawn exactly
+  like a measurement, told apart by the timeline segment, the pill and the label;
+  it is Météo-France-only, live-window-only, **never** exported, **never** drives an
+  alert, and is never described in copy as a measurement. The PIAF credit with the
+  run time is shown while a forecast frame is (Licence Ouverte: source + update date).
 - **The tile matrix is computed from `RADAR_BBOX`** (62 tiles, zoom 3–7 for the
   default France incl. Corsica bbox). Never hardcode the list — a test asserts the
   count is 62; the Météo-France render iterates `radar.tiles`, never a hardcoded list.
@@ -162,8 +184,8 @@ So, in an environment whose ambient Python is older (Claude Code on the web ship
   strings verbatim; the fetch handler stays untouched.
 - **The service worker caches only the static shell.** `frontend/sw.js` precaches
   the explicit `STATIC_SHELL` (HTML, JS, CSS, vendored libs, i18n, icons) and is
-  GET-only / same-origin-only — it **never** intercepts `/tiles/…`, the `/api/…`
-  JSON, the lightning SSE (`/api/lightning/stream` stays unbuffered & uncached), or
+  GET-only / same-origin-only — it **never** intercepts `/tiles/…`, `/forecast/…`,
+  the `/api/…` JSON, the lightning SSE (`/api/lightning/stream` stays unbuffered & uncached), or
   the cross-origin OSM base, so it adds **no** upstream request. When shell assets
   change, bump **both** `STATIC_SHELL` and `CACHE_VERSION` (old caches pruned on
   `activate`). It's served at root scope (`/sw.js`, `Service-Worker-Allowed: /`) via
@@ -172,10 +194,11 @@ So, in an environment whose ambient Python is older (Claude Code on the web ship
   first install, deferred while a video export renders). The PWA is **progressive
   enhancement** — an absent or failed SW leaves the app fully functional, just
   without install or offline support.
-- **Provider/source abstraction:** views/cache never know which provider or
-  lightning source is active. New radar sources go behind `RadarProvider`
-  (`radar/providers/`); new lightning sources behind `LightningSource`
-  (`radar/lightning/`).
+- **Provider/source abstraction:** views/cache never know which provider,
+  lightning source or forecast source is active. New radar sources go behind
+  `RadarProvider` (`radar/providers/`); new lightning sources behind
+  `LightningSource` (`radar/lightning/`); new forecast sources behind
+  `ForecastSource` (`radar/forecast/`, whose `advert.py` is all the views call).
 - **The canonical origin `https://rainradar.hleroy.com` is hardcoded in five
   files** — `index.html`, `apropos.html`, `about.html`, `robots.txt`,
   `sitemap.xml` — because production serves all of them as plain static files
@@ -257,8 +280,8 @@ So, in an environment whose ambient Python is older (Claude Code on the web ship
 
 Deploys are **tag-triggered CD, not run by hand** — the full procedure (what
 "deploy" means as an instruction, rollbacks, the manual recovery fallback, the
-service topology, and enabling the dark `METEOFRANCE_*` / `PUSH_ALERTS_ENABLED`
-flags) lives in the `deploy` skill: [`.claude/skills/deploy/SKILL.md`](.claude/skills/deploy/SKILL.md).
+service topology, and enabling the dark `METEOFRANCE_*` / `PUSH_ALERTS_ENABLED` /
+`FORECAST_ENABLED` flags) lives in the `deploy` skill: [`.claude/skills/deploy/SKILL.md`](.claude/skills/deploy/SKILL.md).
 Migrations must be **backward-compatible (expand/contract)** — they run against the
 live DB before old containers are swapped.
 

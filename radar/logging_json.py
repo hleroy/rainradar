@@ -91,7 +91,9 @@ def emit(logger: logging.Logger, level: int, event: str, **fields: object) -> No
     ``event`` is used both as the human-readable message and as the ``event``
     field; ``service`` defaults to ``"radar"``. Remaining keyword fields become
     top-level JSON keys under the JSON formatter and are silently carried as
-    ``extra`` under the plain ``verbose`` formatter.
+    ``extra`` under the plain ``verbose`` formatter. ``exc_info=True`` attaches the
+    current exception's traceback, as it does for ``logger.log``.
     """
+    exc_info = fields.pop("exc_info", None)
     extra = {"event": event, "service": fields.pop("service", "radar"), **fields}
-    logger.log(level, event, extra=extra)
+    logger.log(level, event, extra=extra, exc_info=exc_info)

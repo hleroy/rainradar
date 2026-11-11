@@ -22,6 +22,8 @@ including Corsica), with:
 - a **90-day archive** any moment of which can be seeked to via a date sheet;
 - a **lightning layer**, live over SSE and historical from the archive, synced to the
   radar cursor;
+- a **1-hour rain forecast** (Météo-France PIAF, flag-gated) continuing the live timeline
+  past the newest measurement, always marked as a forecast (§5.6);
 - **storm proximity alerts** around a user-chosen anchor, in the foreground and
   (optionally) via Web Push while the app is closed;
 - a **client-side video export** producing a short shareable MP4;
@@ -56,6 +58,7 @@ accordingly.
 | Redis client          | redis-py (`redis.asyncio`)                                             |
 | Tile storage          | Flat PNG files on the durable volume                                   |
 | Radar sources         | RainViewer (default) · Météo-France DPRadar (flag-gated)               |
+| Forecast source       | Météo-France PIAF, GRIB2 decoded by hand (flag-gated)                  |
 | Lightning source      | Blitzortung.org WebSocket                                              |
 | Grid rendering        | numpy + pyproj + Pillow + h5py (no GDAL)                               |
 | Web Push              | pywebpush + self-generated VAPID keys                                  |
@@ -89,10 +92,11 @@ static assets carry no content hash, which Nginx compensates for with
                                      │
                           ┌──────────▼───────────┐
                           │        Nginx         │  SPA shell, /static,
-                          │                      │  /tiles (static), proxy
+                          │                      │  /tiles + /forecast
+                          │                      │  (static), proxy
                           └──────┬────────┬──────┘
-                    /tiles hit   │        │  /api, /metrics, health,
-                    (static)     │        │  /tiles miss (try_files)
+                    tile hit     │        │  /api, /metrics, health,
+                    (static)     │        │  tile miss (try_files)
                                  │        │
                         ┌────────▼──┐  ┌──▼────────────┐
                         │ tile files│  │    Django     │
@@ -108,6 +112,7 @@ static assets carry no content hash, which Nginx compensates for with
                           │  APScheduler (exactly 1)       │
                           │   ├ radar poll (RainViewer)    │
                           │   ├ radar poll (Météo-France)* │
+                          │   ├ forecast poll (PIAF)*      │
                           │   ├ retention janitor (daily)  │
                           │   └ partition maintenance      │
                           │  Long-lived tasks              │
@@ -119,7 +124,8 @@ static assets carry no content hash, which Nginx compensates for with
         ┌────────────────┬───────────────┼──────────────────┐
         │                │               │                  │
   RainViewer API   Météo-France*    Blitzortung WS*    Push services*
-  (poll 5 min)     (poll 1 min)     (persistent)       (FCM/APNs/Mozilla)
+  (poll 5 min)     (radar 1 min,    (persistent)       (FCM/APNs/Mozilla)
+                    PIAF 20 s)
 
   * = flag-gated
 ```
@@ -145,11 +151,11 @@ unless `ARCHIVER_ENABLED` is set, and that variable is set **true** in the archi
 service's compose block and nowhere else (the `django` service pins it false in its
 own compose block; it never appears in the shared `.envs/*/.django`).
 
-### 4.1 Four failure domains
+### 4.1 Five failure domains
 
-The system deliberately separates four concerns so a fault in one cannot degrade the
+The system deliberately separates five concerns so a fault in one cannot degrade the
 others. This is the organising principle behind the module layout (`radar/providers/`,
-`radar/lightning/`, `radar/alerts/`).
+`radar/lightning/`, `radar/alerts/`, `radar/forecast/`).
 
 | Domain             | Runs in                                  | Gated by                                    | A failure here…                                         |
 | :----------------- | :--------------------------------------- | :------------------------------------------ | :------------------------------------------------------ |
@@ -157,6 +163,7 @@ others. This is the organising principle behind the module layout (`radar/provid
 | Météo-France radar | its own archiver poll job                | `METEOFRANCE_ENABLED`                       | degrades that provider only; RainViewer keeps archiving |
 | Lightning          | archiver ingest tasks (WS + writer)      | `LIGHTNING_ENABLED`                         | never blocks or crashes the radar poll                  |
 | Storm-alert push   | archiver evaluator task                  | `PUSH_ALERTS_ENABLED` + `LIGHTNING_ENABLED` | never touches radar or lightning ingest                 |
+| 1-hour forecast    | its own archiver job (`poll_forecast`)   | `FORECAST_ENABLED` + `METEOFRANCE_ENABLED`  | no forecast is advertised; both radar polls unaffected  |
 
 Isolation is achieved by three mechanisms, in order of importance:
 
@@ -169,8 +176,11 @@ Isolation is achieved by three mechanisms, in order of importance:
    need no provider-specific handling.
 3. **Thin seams.** Radar and lightning touch in exactly three places: the `lightning`
    advert inside `/api/radar/frames`, the janitor's partition-drop clause, and
-   `run_archiver` starting the ingest tasks. Keeping that list short is what makes the
-   isolation claim checkable.
+   `run_archiver` starting the ingest tasks. The forecast touches the radar side in
+   four: the `forecast` advert, `run_archiver` scheduling its job, and two *passive*
+   reads of the Météo-France provider (its token holder and its newest frame's
+   coverage, §5.6). Keeping those lists short is what makes the isolation claim
+   checkable.
 
 The push evaluator sits strictly *downstream* of lightning ingest: it subscribes to the
 already-published `lightning:strikes` Redis channel rather than tapping the WS loop, so
@@ -416,6 +426,92 @@ rather than as two separable signals. **Never describe the wash in UI copy as a 
 measurement, and never let it drive an alert.** Its presence is a measurement; its extent
 is a presentation choice (the chosen blur paints roughly 2.8× the unblurred echo area).
 
+### 5.6 The 1-hour forecast (not a provider)
+
+A short forecast continues the live timeline: Météo-France's **PIAF** (*Prévision
+Immédiate Agrégée Fusionnée*), a 5-minute, 0.01° rain forecast published every 5
+minutes on the same API portal as DPRadar. For its first hour PIAF is radar
+extrapolation blended with the AROME-PI model — what we would otherwise have computed
+ourselves with `pysteps`, at worse quality. The research, the product decisions and
+the Phase 0 measurements behind it are in [`forecast-nowcast.md`](forecast-nowcast.md);
+this section records the shape that shipped.
+
+**It is a fifth failure domain, and deliberately not a `RadarProvider`.** A provider
+means "past frames, archived idempotently for 90 days"; a forecast run is superseded
+every 5 minutes and never archived. Routing it through the provider would entangle gap
+accounting, `RadarFrame` rows and retention with disposable data. It mirrors the
+lightning seam instead: a `ForecastSource` protocol in `radar/forecast/base.py`, the PIAF
+client behind it, and one archiver job, `poll_forecast` (`max_instances=1`, every 20 s),
+scheduled only when `FORECAST_ENABLED` and `METEOFRANCE_ENABLED` are both on. Its
+upstream failures map onto `ForecastUnavailable` and stop at the job; any other error
+while building a run (a full disk, a render error, a bug) fails that run the same way —
+cooled down for `FORECAST_FAILURE_COOLDOWN` and counted as `crashed` — rather than
+escaping to `_safe` and being retried every tick. No Postgres row is written.
+
+**One tick.** Runs sit on a fixed 5-minute clock and land ~9 minutes after their
+reference time (529–581 s measured), so the job computes the run that should exist and
+probes it directly — the 2 MB `GetCapabilities` document is never fetched, and no
+coverage ID is ever read from upstream XML. **404 means "not published yet"** and costs
+a ~600-byte answer; it is a retry, never a failure. Once a run answers, its 13 lead
+times (10–70 min: lead 5 is always already measured by then) download under a
+concurrency cap, decode, render and land on disk frame by frame; only when every frame
+is done is the run published. A run that fails is left alone for 60 s, so a persistent
+fault costs one download a minute rather than one per tick. Steady state: ~3 small
+probes and 13 × 3.2 MB per run — the server does not compress, so **~12 GB a day**,
+about 20× the observation poll.
+
+**Decoding trusts nothing upstream says about itself.** The payload is one GRIB2
+message, simple packing, 16 bits, no bitmap — a big-endian `uint16` array — so
+`grib_decode.py` is hand-written in the style of `bufr_decode.py` rather than pulling in
+~45 MB of native ecCodes. Its value is the validation: centre, templates, grid geometry,
+reference time and valid time are all pinned, because the service once answered a
+request with somebody else's GRIB under a 200, and because three labels (coverage
+name, GRIB parameter, `DescribeCoverage`) call the field a *rate* in kg m⁻² s⁻¹ when the
+numbers are **millimetres accumulated over 5 minutes** — the same quantity as
+`LAME_D_EAU`, converted ×12 to mm/h. Drift raises; it never mis-decodes.
+
+**Rendering reuses the observation pipeline, masked to the observation's coverage.**
+The decoded field goes through `meteofrance_render`'s rain LUT and tile loop, so
+measured and forecast frames read as one picture. PIAF has no "no data": outside the
+radar network it carries model rain (Bay of Biscay, northern Spain, open sea — ~11 % of
+the bbox). That rain is hidden: the forecast is masked with the `nodata` cells of the
+newest `LAME_D_EAU` frame, which the Météo-France provider keeps for exactly this
+(`latest_coverage()`), so the forecast never shows rain where the measurement cannot.
+No run is published against a coverage more than an hour old. A run keeps the coverage
+its first frame was masked to until it is published, even across several ticks, so its
+frames never mix masks and its record's `coverage_ts` is exact; frames found on disk
+without that pin (an archiver restart mid-run) are redone rather than mixed.
+
+**The token is shared, not duplicated.** Minting a Météo-France token usually revokes
+the application's previous one within seconds, so the forecast client uses the
+provider's own `MeteoFranceAuth` instance; a second instance in the same process would
+knock out the first. A 401 invalidates that shared token and retries once — but only
+the token *that request carried*: `invalidate(stale)` is a no-op once the cache holds a
+newer one. Concurrent callers (the forecast's leads, the observation poll) get their
+401s back at different moments, and a late one clearing the token another 401 had just
+minted would mint again, revoking it under everyone else.
+
+**Publication is atomic.** A frame's tiles are written atomically, then its `.done`
+marker; the run's `run.json` record only after every frame is done, and the Redis
+pointer `forecast:current` only after that (§6.2, §11). A half-written run is never
+advertised, a retry re-fetches only frames without a marker, and a Redis flush is
+repaired from disk on the next tick. The job keeps the newest three complete runs, so a
+client mid-animation never loses its tiles, and deletes the rest itself — the
+retention janitor never sees this tree.
+
+**Serving decides staleness, not the job.** The `forecast` advert in
+`/api/radar/frames` (§12) shows a run's frames only while they are worth showing:
+never past `FORECAST_MAX_RUN_AGE` (20 min, one missed run), never at or before the
+newest measured frame (once measured, the measurement wins), never beyond
+`FORECAST_HORIZON_SECONDS` (60 min) past it, and never at all if the first remaining
+frame would leave a hole after the newest measurement. No forecast is better than a
+stale one shown as current. How the frontend keeps it apart from measurements is §13.10.
+
+**What the forecast never does**: appear for RainViewer (its palette differs, so the
+boundary would change colour scale mid-animation), appear for an archived date (past
+runs are not kept), appear in the video export, drive a storm alert, or be described
+in UI copy as a measurement.
+
 ---
 
 ## 6. Coverage, tile matrix and storage
@@ -458,12 +554,38 @@ Nginx serves this tree directly with a strict numeric regex (path-traversal defe
 `Cache-Control: public, max-age=31536000, immutable` — archived tiles never change — with
 a `try_files` fallback to Django for tiles not yet written.
 
+**Forecast tiles have their own root** (`FORECAST_ROOT`, `/data/forecast` on the same
+volume), never under `TILE_ROOT`:
+
+```
+{FORECAST_ROOT}/{run_ts}/{valid_ts}/{z}/{x}/{y}.png
+{FORECAST_ROOT}/{run_ts}/{valid_ts}/.done      every tile of that frame written
+{FORECAST_ROOT}/{run_ts}/run.json              every frame done: the run's record
+```
+
+The archive tree is immutable per frame and swept by the janitor and the storage gauge;
+forecast frames are superseded every run. Keying the path — and the URL,
+`/forecast/{run}/{valid}/{z}/{x}/{y}.png` — by run **and** valid time makes each tile
+unique and therefore `immutable` too, though the same valid time changes with every run.
+Only non-empty tiles are written. Nginx serves them with the same strict regex, which
+also keeps the markers unreachable, and sends misses to Django, which answers from disk
+alone: 204 (`immutable`) for an empty tile of a done frame, an uncached 404 for anything
+else. It never fetches upstream.
+
+The forecast job prunes this tree **on every tick**, whatever the tick did: it keeps the
+newest `FORECAST_RETAIN_RUNS` complete runs, the published one, and any run still in the
+candidate window, and deletes the rest. A partial run older than that window can never
+be finished, and since the storage gauge only measures `TILE_ROOT`, pruning only after a
+publish would let runs that keep failing part-way fill the shared volume unseen.
+
 ### 6.3 Storage budget
 
 Provisioned volume is 20 GiB (`STORAGE_CAPACITY_BYTES`), which backs the
 `radar_storage_used_ratio` metric; the host alerting stack warns at 75 %. Radar tiles
 dominate; lightning rows, Redis and Postgres overhead are rounding errors beside them.
 Enabling the reflectivity wash costs additional disk, since more tiles are non-empty.
+The forecast costs a few tens of MB at most (three runs of ~10–16 MB), outside
+`TILE_ROOT` and so outside the storage gauge.
 
 ---
 
@@ -593,6 +715,9 @@ Because the map has a timeline (unlike a static strike snapshot), the lightning 
 is slaved to the radar cursor: the frame at time *T* shows exactly the strikes in its own
 slice `(previous frame, T]`. Scrubbing or playing animates rain and lightning in
 lockstep. Strikes are drawn on a Canvas overlay that never intercepts map interactions.
+A forecast frame (§5.6) is in the future, so its slice is empty: otherwise the first
+one would show strikes that happened after the newest radar measurement as if they went
+with the forecast rain. The strike history is fetched only up to that measurement.
 
 That overlay is a hand-rolled `L.Layer`, so it has to opt into Leaflet's zoom
 contract explicitly or it desynchronises from the tiles: it CSS-transforms the canvas
@@ -756,6 +881,8 @@ nothing but a cold cache.
 | `lightning:ws_connected` · `…_since` · `reconnects` · `queue_dropped` · `strikes_total` · `last_strike_ts` | string               | none              | Ingest gauges and counters                                 |
 | `alerts:throttle:{sub_id}`                                                                                 | hash `{outer,inner}` | 2 × re-arm window | Last in-ring strike epoch per tier                         |
 | `alerts:push_sent` · `push_failed` · `push_pruned`                                                         | string               | none              | Push delivery counters                                     |
+| `forecast:current`                                                                                         | string               | none              | The published forecast run's record; rebuilt from disk     |
+| `forecast:count:{not_ready,fetch_failed,rejected,crashed,bytes,runs_published}`                            | string               | none              | Forecast job counters                                      |
 
 Keys are **provider-namespaced wherever they are provider-specific**, so switching
 sources never serves state belonging to another one.
@@ -776,19 +903,20 @@ revalidate — the payloads have no content hash), and are covered by
 `ConditionalGetMiddleware` so an unchanged payload revalidates as an empty 304. The SSE
 stream sets its own headers and is exempt.
 
-| Endpoint                                            | Returns                                                                   | Notes                                                                                   |
-| :-------------------------------------------------- | :------------------------------------------------------------------------ | :-------------------------------------------------------------------------------------- |
-| `GET /api/radar/frames[?provider=][&from=&to=]`     | `{frames, provider, attribution, providers[], gaps[], bbox, lightning{}}` | Live window (micro-cached 15 s) or a historical range (≤ 36 h, uncached)                |
-| `GET /api/radar/latest[?provider=]`                 | `{timestamp}`                                                             | Newest live frame straight from the provider                                            |
-| `GET /api/radar/range[?provider=]`                  | `{earliest, latest}`                                                      | Per-provider archive bounds for the date picker (Redis-cached 60 s)                     |
-| `GET /tiles/{provider}/{date}/{ts}/{z}/{x}/{y}.png` | PNG, `immutable`                                                          | Nginx-static; `try_files` falls back to Django, which answers a known-empty tile 204 (also `immutable`) before going upstream |
-| `GET /api/lightning/stream`                         | SSE `event: strike`                                                       | Replays the recent buffer, then tails Redis pub/sub; heartbeat comments; never buffered |
-| `GET /api/lightning/history?from=&to=[&bbox=]`      | `{strikes[], truncated, attribution}`                                     | ≤ 24 h span, ≤ 50 000 strikes (newest kept)                                             |
-| `POST /api/alerts/subscribe`                        | `{ok:true}`                                                               | Upsert a Web Push subscription by endpoint; 404 when the flag is off                    |
-| `POST /api/alerts/unsubscribe`                      | `{ok:true}`                                                               | Deletes the row; idempotent                                                             |
-| `GET /api/stats`                                    | About-dialog JSON                                                         | Redis-cached 60 s; degrades to nulls, never 5xx                                         |
-| `GET /metrics`                                      | Prometheus text                                                           | Public by design; Redis-cached 30 s                                                     |
-| `GET /healthz` · `GET /readyz`                      | `{status}`                                                                | Liveness (always 200) · readiness (Redis + DB reachable)                                |
+| Endpoint                                            | Returns                                                                               | Notes                                                                                                                                            |
+| :-------------------------------------------------- | :------------------------------------------------------------------------------------ | :----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/radar/frames[?provider=][&from=&to=]`     | `{frames, provider, attribution, providers[], gaps[], bbox, lightning{}, forecast{}}` | Live window (micro-cached 15 s) or a historical range (≤ 36 h, uncached)                                                                         |
+| `GET /api/radar/latest[?provider=]`                 | `{timestamp}`                                                                         | Newest live frame straight from the provider                                                                                                     |
+| `GET /api/radar/range[?provider=]`                  | `{earliest, latest}`                                                                  | Per-provider archive bounds for the date picker (Redis-cached 60 s)                                                                              |
+| `GET /tiles/{provider}/{date}/{ts}/{z}/{x}/{y}.png` | PNG, `immutable`                                                                      | Nginx-static; `try_files` falls back to Django, which answers a known-empty tile 204 (also `immutable`) before going upstream                    |
+| `GET /forecast/{run}/{valid}/{z}/{x}/{y}.png`       | PNG, `immutable`                                                                      | Nginx-static from `FORECAST_ROOT`; Django answers misses from disk only: 204 (`immutable`) in a done frame, else an uncached 404. Never upstream |
+| `GET /api/lightning/stream`                         | SSE `event: strike`                                                                   | Replays the recent buffer, then tails Redis pub/sub; heartbeat comments; never buffered                                                          |
+| `GET /api/lightning/history?from=&to=[&bbox=]`      | `{strikes[], truncated, attribution}`                                                 | ≤ 24 h span, ≤ 50 000 strikes (newest kept)                                                                                                      |
+| `POST /api/alerts/subscribe`                        | `{ok:true}`                                                                           | Upsert a Web Push subscription by endpoint; 404 when the flag is off                                                                             |
+| `POST /api/alerts/unsubscribe`                      | `{ok:true}`                                                                           | Deletes the row; idempotent                                                                                                                      |
+| `GET /api/stats`                                    | About-dialog JSON                                                                     | Redis-cached 60 s; degrades to nulls, never 5xx                                                                                                  |
+| `GET /metrics`                                      | Prometheus text                                                                       | Public by design; Redis-cached 30 s                                                                                                              |
+| `GET /healthz` · `GET /readyz`                      | `{status}`                                                                            | Liveness (always 200) · readiness (Redis + DB reachable)                                                                                         |
 
 ### 12.1 `/api/radar/frames` is the bootstrap document
 
@@ -798,8 +926,18 @@ attribution and `frame_interval` (which drives the source switch and the gap tol
 the archive gaps overlapping the window, the coverage bbox (so Leaflet never requests
 tiles outside the matrix), and the lightning advert — whether the layer exists, its
 attribution, bbox, display window, and whether Web Push is available with which VAPID
-key. A client that does not understand a field ignores it, which is how the layer, the
-alerts and the source switch were each added without a breaking change.
+key — and the forecast advert. A client that does not understand a field ignores it,
+which is how the layer, the alerts, the source switch and the forecast were each added
+without a breaking change.
+
+The forecast advert is `{enabled, provider, run, frames: [{timestamp}], attribution,
+tile_base}`. `enabled` is `FORECAST_ENABLED` and `provider` the radar source it extends
+(`meteofrance`), so a client can tell "not served here" from "nothing to show right
+now". `frames` is empty — with `run` and `tile_base` null — for any other provider, for a
+historical range, and whenever the staleness rules of §5.6 drop the run. A frame's tiles
+are `{tile_base}/{timestamp}/{z}/{x}/{y}.png`. `attribution` is the PIAF credit; the
+licence's other requirement, the date of last update, is `run`, which the client
+formats (§12.2).
 
 ### 12.2 Timestamps are raw epochs, never pre-formatted labels
 
@@ -814,6 +952,10 @@ the contract and break the moment the user switches language client-side.
 - Historical queries never fall back — an unreachable database is an honest 503.
 - Tiles: unknown provider, out-of-matrix, or mismatched date → 404. Archived frame with
   no tile on disk → 204. Upstream error after retries → 502.
+- The forecast advert reads only its Redis pointer. A Redis error or a mangled record is
+  an advert with no frames, never a failed `/api/radar/frames`.
+- Forecast tiles: done frame without the tile → 204; pruned run, unfinished frame,
+  off-matrix tile or flag off → uncached 404.
 - `/api/stats` never 5xxs; a failing piece renders as `null`.
 
 ---
@@ -877,6 +1019,12 @@ so a stall can never become a permanent 30 s poll. And the backoff ceiling is
 `max(frame_interval, 10 min)` rather than a flat 30 min, because a view labelled DIRECT
 may not sit half an hour behind while it waits out a shedding server.
 
+**The forecast does not move LIVE.** Forecast frames (§13.10) are appended after the
+measured ones, and everything above — the live edge, "did a frame land?", the refresh
+anchor — reads the newest *measured* frame. Stepping, scrubbing or playing past it
+leaves LIVE; scrubbing back onto it re-arms following. A new forecast run alone, with no
+new measurement, still triggers a rebuild of the timeline.
+
 One failure mode is worth naming because it was invisible: `fetch` *rejects* on a
 network-level error rather than resolving, and the rejection used to escape the async
 timeout callback — so a single offline blip killed the self-scheduling chain for the life
@@ -888,7 +1036,9 @@ a failed fetch like any other.
 Non-negotiable, because the data licences require it: the active radar provider's credit
 (taken verbatim from the backend `attribution` field), "© OpenStreetMap contributors",
 and the Blitzortung credit whenever the lightning layer is active — all in Leaflet's
-attribution control. The credit strings are the one HTML-bearing data path from backend
+attribution control. While a forecast frame is on screen the PIAF credit joins them,
+followed by the run time ("mise à jour 14:15"): Etalab's Licence Ouverte requires both
+the source and the date of last update. The credit strings are the one HTML-bearing data path from backend
 to DOM, which is why the CSP on the shell document is the backstop for them.
 
 ### 13.3 Internationalisation
@@ -936,15 +1086,18 @@ It is strictly additive and reuses **only already-loaded data**: same-origin `/t
 the loaded strike pool, and the existing OSM base read back from the HTTP cache (the base
 layer is `crossOrigin: "anonymous"` precisely so the canvas stays readable). **No new
 upstream call, no server compute, no task.** It burns the mandatory attribution and a UTC
-timestamp into every frame, and never draws the geolocation marker. A failed export is a
+timestamp into every frame, and never draws the geolocation marker. **Forecast frames
+are never exported**: `radar.getExportData()` drops them, and a cursor in the forecast
+exports the window ending on the newest measurement. Were that ever to change, every
+forecast frame would have to burn in a "forecast" label beside its timestamp. A failed export is a
 localised toast — never an uncaught exception, never a radar or lightning impact.
 
 ### 13.6 PWA and the service worker
 
 `sw.js` is hand-written, classic, and precaches an **explicit static shell** — HTML, JS,
 CSS, vendored libraries, i18n files, icons. It is GET-only and same-origin-only, and it
-**never** intercepts `/tiles/…`, the `/api/…` JSON, the lightning SSE, or the
-cross-origin OSM base. It therefore adds no upstream request of any kind; the SSE stream
+**never** intercepts `/tiles/…`, `/forecast/…`, the `/api/…` JSON, the lightning SSE, or
+the cross-origin OSM base. It therefore adds no upstream request of any kind; the SSE stream
 in particular must stay unbuffered and uncached.
 
 Navigations are network-first with the cached shell as fallback; `/static/` assets are
@@ -1101,6 +1254,31 @@ because they track an animation Leaflet plays unconditionally — gating them wo
 reintroduce the desync rather than remove motion. Both members of this list once had
 the bug and both fixes are pinned by tests; a third such element should be added here.
 
+### 13.10 The forecast on the timeline
+
+The user must always be able to tell whether the picture is measured or forecast. The
+map itself does not say: a forecast frame is drawn **exactly like a measurement** — the
+same palette, which is the legend, and the user's own opacity. A reduced opacity would
+fight that setting, and a different palette or texture would change what an intensity
+appears to be. The cues are elsewhere:
+
+- **The timeline.** The forecast segment of the track has its own colour **and** a
+  dashed pattern, so it does not rely on colour alone, starting at a "now" tick on the
+  newest measurement. The tick is drawn as two notches above and below the track,
+  because in the default LIVE state the thumb rests exactly on it.
+- **The pill.** Past the tick the LIVE pill becomes "PRÉVISION / +25 min" — the lead
+  time counted from the newest measurement — with `aria-pressed="false"` and a spoken
+  label, and stays the way back to live on click. It sits on the map, so it is also the
+  cue for someone watching the animation rather than the scrubber.
+- **The time label.** "Prévision" appears under the time, and in the scrubber bubble.
+
+The forecast exists only in the live window and only with the Météo-France source. A
+toggle in the settings popover ("Afficher la prévision", **on by default**,
+persisted per browser) hides it; it is shown only when the backend advertises a
+forecast. The layer cache in `radar.js` is keyed by tile URL rather than timestamp,
+because the same time is first forecast and then measured, with different tiles, and
+one must never be served for the other.
+
 ---
 
 ## 14. Configuration and feature flags
@@ -1117,18 +1295,22 @@ Everything else that differs between dev and prod belongs in the concrete settin
 module, not in a `.env` file. `.envs/` follows the per-service tree convention
 (`.envs/.{environment}/.{service}`); the production tree is gitignored.
 
-| Name                               | Kind                                      | Default | Gates                                                                            |
-| :--------------------------------- | :---------------------------------------- | :------ | :------------------------------------------------------------------------------- |
-| `ARCHIVER_ENABLED`                 | Per-container role flag (env)             | off     | `run_archiver` — set true in the `archiver` service and nowhere else             |
-| `LIGHTNING_ENABLED`                | Per-container role flag (env)             | off     | Blitzortung ingest (archiver) **and** the layer advert / SSE / history (web)     |
-| `METEOFRANCE_ENABLED`              | Per-deployment flag (settings constant)   | off     | The Météo-France provider, its poll job, and its entry in the `providers` advert |
-| `METEOFRANCE_REFLECTIVITY_ENABLED` | Sub-flag of the above (settings constant) | off     | The REFLECTIVITE wash composited under the rain                                  |
-| `PUSH_ALERTS_ENABLED`              | Per-deployment flag (settings constant)   | off     | Subscribe/unsubscribe endpoints, the push advert, and the archiver evaluator     |
+| Name                               | Kind                                      | Default | Gates                                                                                                   |
+| :--------------------------------- | :---------------------------------------- | :------ | :------------------------------------------------------------------------------------------------------ |
+| `ARCHIVER_ENABLED`                 | Per-container role flag (env)             | off     | `run_archiver` — set true in the `archiver` service and nowhere else                                    |
+| `LIGHTNING_ENABLED`                | Per-container role flag (env)             | off     | Blitzortung ingest (archiver) **and** the layer advert / SSE / history (web)                            |
+| `METEOFRANCE_ENABLED`              | Per-deployment flag (settings constant)   | off     | The Météo-France provider, its poll job, and its entry in the `providers` advert                        |
+| `METEOFRANCE_REFLECTIVITY_ENABLED` | Sub-flag of the above (settings constant) | off     | The REFLECTIVITE wash composited under the rain                                                         |
+| `PUSH_ALERTS_ENABLED`              | Per-deployment flag (settings constant)   | off     | Subscribe/unsubscribe endpoints, the push advert, and the archiver evaluator                            |
+| `FORECAST_ENABLED`                 | Per-deployment flag (settings constant)   | off     | The forecast job, the `forecast` advert's frames and `/forecast/` tiles; requires `METEOFRANCE_ENABLED` |
 
 The `Default` column is the value in `base.py`. Concrete settings modules override it
-per deployment: `production.py` now turns **all three** per-deployment flags on — both
-`METEOFRANCE_*` (the provider is live, wash included) and `PUSH_ALERTS_ENABLED`
-(background Web Push on top of the always-on foreground alerts). Because these are
+per deployment: `production.py` turns every per-deployment flag on — both
+`METEOFRANCE_*` (the provider is live, wash included), `PUSH_ALERTS_ENABLED`
+(background Web Push on top of the always-on foreground alerts) and `FORECAST_ENABLED`.
+The forecast stays off in dev: a run costs 13 × 3.2 MB of downloads, ~12 GB a day, and
+running it locally with the production credential revokes production's token (the
+`deploy` skill). Because these are
 settings constants, they are not readable from the environment: putting one in
 `.envs/` looks like it works and is silently ignored.
 
@@ -1178,14 +1360,18 @@ The app **instruments only**. It emits:
   counts total / 24 h / partial / failed, per-provider frame counts and last-poll epochs,
   gap totals and an open-gap flag, archive bounds, tile-directory bytes and used ratio;
   lightning strike totals / 24 h / archived rows, WS connected flag and uptime, reconnects,
-  queue drops, last-strike epoch, partition count; and push subscription count with
-  sent / failed / pruned counters.
+  queue drops, last-strike epoch, partition count; push subscription count with
+  sent / failed / pruned counters; and, when the forecast is enabled, the published
+  run's reference time, publication time and lag (`forecast_run_timestamp`,
+  `forecast_published_timestamp`, `forecast_publication_lag_seconds`) plus its
+  not-ready / fetch-failed / rejected / bytes / runs-published counters.
 - **Structured one-line JSON logs to stdout** in production, with canonical events:
   `poll_start`, `poll_complete`, `frame_archived`, `fetch_failed`, `frame_failed`,
   `gap_opened`, `gap_closed`, `retention_run`, `job_crashed`, `tile_fallback`,
   `ws_connected`, `ws_disconnected`, `queue_overflow`, `batch_written`, `batch_failed`,
   `push_sent`, `push_failed`, `push_pruned`, `push_subscribed`, `push_unsubscribed`,
-  plus the Météo-France pair `frame_downloaded` / `frame_rendered`.
+  `forecast_published`, `forecast_run_failed`, `forecast_pruned`, plus the Météo-France pair
+  `frame_downloaded` / `frame_rendered`.
 - **Météo-France frame cost** decomposes via those last two. `poll_complete.duration_ms`
   is a whole poll — catalog GET, both product downloads, decode, render and the disk
   writes of *every* frame that poll archived — so it can never answer "what does the
@@ -1202,7 +1388,12 @@ alert rules live on the host observability stack, alongside the existing Traefik
 alert conditions this instrumentation is designed to support: a gap opened (alert), radar
 fetch failed three times (warning), sustained upstream 429 throttling (warning — the
 concurrency cap may need lowering, §5.3), Blitzortung disconnected for more than five
-minutes (critical), and storage above 75 % of capacity.
+minutes (critical), and storage above 75 % of capacity. With the forecast on, a run
+older than ~20 minutes (`time() - forecast_run_timestamp > 1200`) means the advert has
+gone empty and is worth a warning; a rising `forecast_rejected_total` means PIAF's
+payload drifted and the decoder is refusing it, as designed; a rising
+`forecast_crashed_total` means a run failed on something else — a full disk, a render
+error, a bug — and its `forecast_run_failed` log (`reason=crashed`) carries the traceback.
 
 ---
 
@@ -1222,6 +1413,7 @@ too — there is no separate local Postgres image.
 | TLS / routing  | None (`localhost:8000`)                       | Traefik + Let's Encrypt                               |
 | Météo-France   | Enabled, so dev exercises the render pipeline | Off by default; opt-in per deployment                 |
 | Push alerts    | Opt-in                                        | Off by default; opt-in per deployment                 |
+| Forecast       | Off (~12 GB/day of downloads); opt-in         | Off; opt-in per deployment                            |
 | Redis          | Container, ephemeral                          | Container, ephemeral (no persistence)                 |
 | Env files      | `.envs/.local/*`                              | `.envs/.production/*` (gitignored)                    |
 
@@ -1252,8 +1444,10 @@ without real waits or real sockets.
 Several tests are load-bearing pins rather than incidental coverage, and should not be
 "fixed" to match a code change without understanding what they protect: the 62-tile
 matrix count, the single-flight guarantee (62 concurrent tile calls must produce one
-download), the linear-Z-vs-dB smoothing split, and the BUFR orientation and floor
-fixtures.
+download), the linear-Z-vs-dB smoothing split, the BUFR orientation and floor
+fixtures, the PIAF GRIB fixtures and their validation (a wrong run or valid time, a
+non-GRIB 200 and a drifted template are all rejected), and the forecast advert's
+staleness rules.
 
 ---
 
@@ -1281,3 +1475,7 @@ before old containers are swapped out.
 - **A build step for the frontend** — see §2.
 - **Observability containers in this repo** — see §16.
 - **Redis persistence** — see §11.
+- **Our own nowcasting** (`pysteps` optical flow, or a learned model) — PIAF is the same
+  method blended with a model, for free; see [`forecast-nowcast.md`](forecast-nowcast.md) §1.
+- **The forecast in the archive or the video export** — past runs are not kept, and an
+  exported clip carries no on-map "forecast" cue (§5.6, §13.5).

@@ -69,8 +69,14 @@ def _ms(seconds: float) -> float:
     return round(seconds * 1000.0, 1)
 
 
-def _decode_render(h5_bytes: bytes, bufr_bytes: bytes | None, ts: int) -> dict:
+def _decode_render(
+    h5_bytes: bytes, bufr_bytes: bytes | None, ts: int
+) -> tuple[dict, meteofrance_render.Coverage | None]:
     """Parse + render one frame (CPU-bound; the provider runs it in a thread).
+
+    Returns the rendered tiles and, when ``FORECAST_ENABLED``, the frame's radar
+    coverage — the mask the forecast is drawn inside (see
+    :meth:`MeteoFranceProvider.latest_coverage`).
 
     ``bufr_bytes`` is the optional REFLECTIVITE product. It is best-effort by design:
     a decode failure degrades to the byte-identical rain-only render rather
@@ -108,7 +114,8 @@ def _decode_render(h5_bytes: bytes, bufr_bytes: bytes | None, ts: int) -> dict:
         total_ms=_ms(time.perf_counter() - t0),
         tiles=sum(png is not None for png in rendered.values()),
     )
-    return rendered
+    coverage = meteofrance_render.coverage_of(grid, ts) if settings.FORECAST_ENABLED else None
+    return rendered, coverage
 
 
 def _decode_wash(bufr_bytes: bytes | None, ts: int):
@@ -171,10 +178,30 @@ class MeteoFranceProvider:
         self._failures: dict[int, tuple[float, BaseException]] = {}
         self._lock: asyncio.Lock | None = None
         self._lock_loop: asyncio.AbstractEventLoop | None = None
+        # The newest decoded frame's radar coverage (FORECAST_ENABLED only).
+        self._coverage: meteofrance_render.Coverage | None = None
 
     @property
     def frame_interval(self) -> int:
         return settings.METEOFRANCE_FRAME_INTERVAL
+
+    @property
+    def auth(self) -> MeteoFranceAuth:
+        """The token holder, shared with the PIAF forecast client.
+
+        Minting a token usually revokes the application's previous one within
+        seconds (``specs/forecast-nowcast.md`` §8.1), so every Météo-France caller in
+        a process must go through this one instance.
+        """
+        return self._auth
+
+    def latest_coverage(self) -> meteofrance_render.Coverage | None:
+        """The radar coverage of the newest frame this instance decoded, if any.
+
+        Read-only seam for the forecast job, which masks PIAF to it. Kept only when
+        ``FORECAST_ENABLED``; ``None`` until a frame has been decoded since start.
+        """
+        return self._coverage
 
     def attribution(self) -> str:
         return _ATTRIBUTION
@@ -241,7 +268,7 @@ class MeteoFranceProvider:
                     if resp.status_code == httpx.codes.OK:
                         return resp.content
                     if resp.status_code == httpx.codes.UNAUTHORIZED and not forced_refresh:
-                        await self._auth.invalidate()  # expired token → one forced retry
+                        await self._auth.invalidate(token)  # expired token → one forced retry
                         forced_refresh = True
                         continue
                     logger.warning("Météo-France catalog -> HTTP %s", resp.status_code)
@@ -421,9 +448,12 @@ class MeteoFranceProvider:
                 rain_bytes=len(h5_bytes),
                 wash_bytes=len(bufr_bytes) if bufr_bytes else 0,
             )
-            return await asyncio.to_thread(_decode_render, h5_bytes, bufr_bytes, ts)
+            rendered, coverage = await asyncio.to_thread(_decode_render, h5_bytes, bufr_bytes, ts)
         except (RenderError, AuthError) as exc:
             raise TileUpstreamError from exc  # chain into the Protocol exception
+        if coverage is not None and (self._coverage is None or coverage.ts > self._coverage.ts):
+            self._coverage = coverage
+        return rendered
 
     async def _download_products(
         self, client: httpx.AsyncClient, ref: str, ts: int
@@ -513,7 +543,7 @@ class MeteoFranceProvider:
                     and invalidate_on_401
                     and not forced_refresh
                 ):
-                    await self._auth.invalidate()
+                    await self._auth.invalidate(token)
                     forced_refresh = True
                     continue
                 logger.warning("Météo-France product -> HTTP %s", resp.status_code)

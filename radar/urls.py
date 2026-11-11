@@ -19,6 +19,13 @@ urlpatterns = [
         views.tile,
         name="tile",
     ),
+    # Forecast tiles, keyed by run *and* valid time so every URL is immutable. Prod
+    # serves them statically from Nginx and sends only misses here. Never upstream.
+    path(
+        "forecast/<int:run>/<int:valid>/<int:z>/<int:x>/<int:y>.png",
+        views.forecast_tile,
+        name="forecast_tile",
+    ),
     # About dialog statistics: read-only, Redis-cached JSON.
     path("api/stats", views.stats, name="stats"),
     path("metrics", views.metrics, name="metrics"),

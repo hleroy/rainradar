@@ -1,6 +1,14 @@
 // Radar frames + tile-layer animation. Tiles come from OUR backend
 // (/tiles/{provider}/{date}/{ts}/{z}/{x}/{y}.png — Nginx-static in prod, Django
 // fallback), never from RainViewer or Météo-France directly.
+//
+// The 1-hour forecast (the /api/radar/frames "forecast" advert) is appended to the
+// live timeline after the measured frames: frames[0 .. observedCount-1] are
+// measurements, the rest are forecast frames, served from /forecast/{run}/{valid}/….
+// LIVE keeps its meaning — the newest MEASURED frame — so the refresh anchor, the
+// live edge and the export all look at the measured part only. A forecast frame is
+// drawn exactly like a measurement (same palette, the user's opacity); what tells
+// them apart is the timeline segment, the pill, the time label and the credit.
 
 import { localDayWindow, localMoment } from "./localtime.js";
 
@@ -49,6 +57,15 @@ function loadStoredProvider() {
 
 // User-set rain-tile opacity (display-settings popover). Read here, at init, so
 // the very first reveal already uses it — no flash of the default.
+// Show the forecast? On by default (product decision); a stored "0" turns it off.
+function loadStoredForecast() {
+  try {
+    return localStorage.getItem("radar_forecast") !== "0";
+  } catch {
+    return true;
+  }
+}
+
 function loadStoredOpacity() {
   try {
     const v = Number(localStorage.getItem("radar_opacity"));
@@ -68,8 +85,12 @@ export async function initRadar(
   // live edge", not merely "the live window is loaded" — a user who scrubbed back
   // is not live, and the pill has to say so (it is the way back).
   let following = true;
-  let frames = [];
+  let frames = []; // measured frames, then (live only) forecast frames
+  let observedCount = 0; // how many of `frames` are measurements
   let gaps = [];
+  let forecast = null; // the /api/radar/frames "forecast" advert
+  let forecastOn = loadStoredForecast();
+  let forecastCredit = null; // the forecast credit currently in the attribution control
   let lightningConfig = null; // the /api/radar/frames "lightning" advert
   let attribution = null; // the active provider's mandatory credit (HTML), for the clip caption
   let provider = loadStoredProvider(); // active radar source; adopted from the advert if null
@@ -90,16 +111,46 @@ export async function initRadar(
   // `provider`, so the clip export (which reuses this fn) follows the switch too.
   const tileUrl = (ts) => `/tiles/${provider}/${utcDate(ts)}/${ts}/{z}/{x}/{y}.png`;
 
+  // A forecast frame carries its own run-scoped URL. The layer cache is keyed by URL,
+  // not by timestamp: a time that is forecast now is measured a few minutes later,
+  // with different tiles, and the cache must never hand one out for the other.
+  const frameUrl = (f) => f.url || tileUrl(f.timestamp);
+  const isForecast = (pos) => !!frames[pos]?.forecast;
+  const newestObservedTs = () => (observedCount ? frames[observedCount - 1].timestamp : null);
+
+  // frames = measurements + the advert's forecast frames (live mode, toggle on, and
+  // only those strictly after the newest measurement — the backend guarantees that,
+  // this keeps the "measured part is a prefix" invariant even if it ever didn't).
+  function setFrames(observed, advert) {
+    forecast = advert || null;
+    observedCount = observed.length;
+    const newest = observedCount ? observed[observedCount - 1].timestamp : null;
+    const extra =
+      mode === "live" && forecastOn && newest != null && forecast && forecast.tile_base
+        ? (forecast.frames || [])
+            .filter((f) => f.timestamp > newest)
+            .map((f) => ({
+              timestamp: f.timestamp,
+              forecast: true,
+              url: `${forecast.tile_base}/${f.timestamp}/{z}/{x}/{y}.png`,
+            }))
+        : [];
+    frames = observed.concat(extra);
+  }
+
   // Tell a listener (the lightning overlay) the current mode, the cursor frame, the
   // previous frame (so it can show exactly *this* frame's lightning slice), and the
   // loaded frame range (so it can fetch the matching strikes). Radar is unaffected.
+  // `forecast` tells the lightning overlay the cursor is in the future, where it must
+  // show nothing; the range stops at the newest measurement for the same reason.
   function radarState() {
     return {
       mode,
       cursorTs: frames[position]?.timestamp,
       prevTs: frames[position - 1]?.timestamp,
       rangeFrom: frames[0]?.timestamp,
-      rangeTo: frames[frames.length - 1]?.timestamp,
+      rangeTo: newestObservedTs() ?? undefined,
+      forecast: isForecast(position),
     };
   }
   function notifyState() {
@@ -113,11 +164,12 @@ export async function initRadar(
   let timer = null;
   let refreshTimer = null;
   let currentLayer = null;
-  // Keyed by frame *timestamp*, not scrubber position: a live refresh replaces the
-  // frame list and every position shifts under it, while a timestamp is the frame's
-  // identity. That is what lets a refresh keep the layer the user is looking at
+  // Keyed by the frame's tile URL, not scrubber position: a live refresh replaces the
+  // frame list and every position shifts under it, while the URL is the frame's
+  // identity (a timestamp is not quite: the same time is first forecast, then
+  // measured). That is what lets a refresh keep the layer the user is looking at
   // (see retainCurrentLayer) instead of tearing the whole cache down.
-  const layerCache = new Map(); // frame timestamp -> L.TileLayer
+  const layerCache = new Map(); // frame tile URL -> L.TileLayer
 
   // Dedicated pane for radar tiles so we can clip them to the bbox without
   // touching the base map. Sits above the OSM tiles (zIndex 200) but below the
@@ -165,6 +217,10 @@ export async function initRadar(
   const playBtn = document.getElementById("play-btn");
   const playIconUse = playBtn.querySelector("use");
   const liveBtn = document.getElementById("live-btn");
+  const liveLabel = document.getElementById("live-label");
+  const liveLead = document.getElementById("live-lead");
+  const forecastTag = document.getElementById("forecast-tag");
+  const forecastOverlay = document.getElementById("forecast-overlay");
   const scrubber = document.getElementById("scrubber");
   const gapOverlay = document.getElementById("gap-overlay");
   const nodataEl = document.getElementById("nodata");
@@ -173,12 +229,12 @@ export async function initRadar(
   const scrubEnd = document.getElementById("scrub-end");
   const scrubBubble = document.getElementById("scrub-bubble");
 
-  function buildLayer(ts) {
+  function buildLayer(f) {
     const opts = { ...TILE_OPTS };
     // Bound to the radar coverage so Leaflet never requests out-of-matrix tiles
     // (which only 404 against our backend) for the surrounding viewport.
     if (radarBounds) opts.bounds = radarBounds;
-    return L.tileLayer(tileUrl(ts), opts);
+    return L.tileLayer(frameUrl(f), opts);
   }
 
   function updateTimestamp() {
@@ -197,7 +253,10 @@ export async function initRadar(
     scrubber.style.setProperty("--scrub-pos", `${pct}%`);
     if (scrubBubble && !scrubBubble.hidden) {
       const f = frames[position];
-      if (f) scrubBubble.textContent = formatTime(f.timestamp);
+      if (f) {
+        const time = formatTime(f.timestamp);
+        scrubBubble.textContent = f.forecast ? `${time} · ${t("forecast.tag")}` : time;
+      }
       // Clamped so the bubble never pokes out of the bar at either end.
       scrubBubble.style.left = `clamp(20px, ${pct}%, calc(100% - 20px))`;
     }
@@ -221,6 +280,8 @@ export async function initRadar(
   function inGap(pos) {
     const f = frames[pos];
     if (!f) return true;
+    // Gaps are holes in the measurements; the forecast is contiguous by contract.
+    if (f.forecast) return false;
     const prev = frames[pos - 1];
     const next = frames[pos + 1];
     const lonely =
@@ -274,10 +335,10 @@ export async function initRadar(
       if (off === 0) continue;
       const p = (((position + off) % frames.length) + frames.length) % frames.length;
       if (p === position || inGap(p)) continue;
-      const ts = frames[p].timestamp;
-      if (layerCache.has(ts)) continue;
-      const layer = buildLayer(ts);
-      layerCache.set(ts, layer);
+      const key = frameUrl(frames[p]);
+      if (layerCache.has(key)) continue;
+      const layer = buildLayer(frames[p]);
+      layerCache.set(key, layer);
       layer.addTo(map);
     }
   }
@@ -288,12 +349,14 @@ export async function initRadar(
   function showFrame(pos) {
     if (frames.length === 0) {
       showNodata(true);
+      renderFrameState();
       return;
     }
     position = ((pos % frames.length) + frames.length) % frames.length;
     if (scrubber) scrubber.value = String(position);
     updateTimestamp();
     updateScrubberVisual();
+    renderFrameState(); // pill, forecast label, forecast credit
     notifyState(); // keep the lightning age reference in step with the cursor
 
     if (inGap(position)) {
@@ -304,11 +367,11 @@ export async function initRadar(
     }
     showNodata(false);
 
-    const ts = frames[position].timestamp;
-    let layer = layerCache.get(ts);
+    const key = frameUrl(frames[position]);
+    let layer = layerCache.get(key);
     if (!layer) {
-      layer = buildLayer(ts);
-      layerCache.set(ts, layer);
+      layer = buildLayer(frames[position]);
+      layerCache.set(key, layer);
     }
     if (!map.hasLayer(layer)) layer.addTo(map);
     currentLayer = layer;
@@ -362,11 +425,11 @@ export async function initRadar(
 
   // Memory hygiene: drop non-current cached layers when the user pans/zooms.
   map.on("movestart", () => {
-    const keep = frames[position]?.timestamp;
-    for (const [ts, layer] of layerCache) {
-      if (ts !== keep) {
+    const keep = frames[position] ? frameUrl(frames[position]) : null;
+    for (const [key, layer] of layerCache) {
+      if (key !== keep) {
         map.removeLayer(layer);
-        layerCache.delete(ts);
+        layerCache.delete(key);
       }
     }
   });
@@ -383,13 +446,13 @@ export async function initRadar(
   // with no rain at all for the whole load: seconds, whenever a tile misses the
   // static cache and falls through to the app. Keeping the current layer means the
   // previous frame stays up until reveal() cross-fades the new one over it, exactly
-  // like a scrub. The survivor stays keyed by its own timestamp, so preloadAround()
+  // like a scrub. The survivor stays keyed by its own URL, so preloadAround()
   // can reuse it and movestart/the next refresh still retire it.
   function retainCurrentLayer() {
-    for (const [ts, layer] of layerCache) {
+    for (const [key, layer] of layerCache) {
       if (layer === currentLayer) continue;
       map.removeLayer(layer);
-      layerCache.delete(ts);
+      layerCache.delete(key);
     }
   }
 
@@ -402,9 +465,11 @@ export async function initRadar(
     const hi = frames[frames.length - 1].timestamp;
     const span = hi - lo;
     if (span <= 0) return;
+    // An ongoing gap runs to the newest measurement, never into the forecast.
+    const openEnd = newestObservedTs() ?? hi;
     for (const g of gaps) {
       const gStart = Math.max(g.start, lo);
-      const gEnd = Math.min(g.end == null ? hi : g.end, hi);
+      const gEnd = Math.min(g.end == null ? openEnd : g.end, hi);
       if (gEnd <= gStart) continue;
       const left = ((gStart - lo) / span) * 100;
       const width = ((gEnd - gStart) / span) * 100;
@@ -414,6 +479,78 @@ export async function initRadar(
       seg.style.width = `${Math.max(width, 0.5)}%`;
       seg.title = t("gap.nodata");
       gapOverlay.appendChild(seg);
+    }
+  }
+
+  // The forecast segment of the track: its own colour AND a dashed pattern (so it does
+  // not rely on colour alone), from a "now" tick on the newest measurement to the end.
+  // Placed by frame index, like the thumb, so the tick sits exactly under the thumb
+  // when the cursor is on the newest measurement.
+  function renderForecastTrack() {
+    if (!forecastOverlay) return;
+    forecastOverlay.replaceChildren();
+    const max = frames.length - 1;
+    if (observedCount === 0 || observedCount === frames.length || max <= 0) return;
+    const left = ((observedCount - 1) / max) * 100;
+    const seg = document.createElement("div");
+    seg.className = "forecast-seg";
+    seg.style.left = `${left}%`;
+    seg.style.width = `${100 - left}%`;
+    const tick = document.createElement("div");
+    tick.className = "forecast-now";
+    tick.style.left = `${left}%`;
+    forecastOverlay.append(seg, tick);
+  }
+
+  // Everything that tells a forecast frame from a measurement, re-derived from the
+  // cursor every time it moves (and on a language switch):
+  //   - the pill: LIVE (blinking) on the newest measurement while following, the
+  //     forecast state with its lead time past the tick, plain LIVE otherwise;
+  //   - the word "forecast" under the time;
+  //   - the Météo-France forecast credit with the run time (Licence Ouverte: source
+  //     AND date of last update), only while a forecast frame is on screen.
+  function renderFrameState() {
+    const f = frames[position];
+    const lead = f && f.forecast ? Math.round((f.timestamp - newestObservedTs()) / 60) : null;
+    if (liveBtn) {
+      if (lead != null) {
+        const aria = t("forecast.pill_aria").replace("{n}", String(lead));
+        liveBtn.dataset.mode = "forecast";
+        liveBtn.setAttribute("aria-pressed", "false");
+        liveBtn.title = aria;
+        liveBtn.setAttribute("aria-label", aria);
+        if (liveLabel) liveLabel.textContent = t("forecast.pill");
+        if (liveLead) {
+          liveLead.textContent = t("forecast.lead").replace("{n}", String(lead));
+          liveLead.hidden = false;
+        }
+      } else {
+        // The pill is a toggle button, and "am I actually live?" is a state a screen
+        // reader must hear too — the blinking dot alone only reaches sighted users.
+        const active = mode === "live" && following;
+        liveBtn.dataset.mode = active ? "live" : "archive";
+        liveBtn.setAttribute("aria-pressed", active ? "true" : "false");
+        liveBtn.title = t("control.live");
+        liveBtn.setAttribute("aria-label", t("control.live"));
+        if (liveLabel) liveLabel.textContent = t("control.live");
+        if (liveLead) {
+          liveLead.textContent = "";
+          liveLead.hidden = true;
+        }
+      }
+    }
+    if (forecastTag) {
+      forecastTag.dataset.show = lead != null ? "true" : "false";
+      forecastTag.textContent = t("forecast.tag");
+    }
+    const credit =
+      lead != null && forecast && forecast.attribution
+        ? `${forecast.attribution}, ${t("forecast.updated").replace("{time}", formatTime(forecast.run))}`
+        : null;
+    if (credit !== forecastCredit) {
+      if (forecastCredit && onAttributionRemove) onAttributionRemove(forecastCredit);
+      forecastCredit = credit;
+      if (credit && onAttribution) onAttribution(credit);
     }
   }
 
@@ -428,7 +565,7 @@ export async function initRadar(
   }
 
   function applyData(data) {
-    frames = (data && data.frames) || [];
+    setFrames((data && data.frames) || [], data && data.forecast);
     gaps = (data && data.gaps) || [];
     if (data && data.lightning) lightningConfig = data.lightning;
     if (data && Array.isArray(data.providers)) providers = data.providers;
@@ -459,6 +596,7 @@ export async function initRadar(
     clearLayers();
     setScrubberRange();
     renderGaps();
+    renderForecastTrack();
   }
 
   function clearStoredProvider() {
@@ -528,36 +666,49 @@ export async function initRadar(
     const next = res.data.frames || [];
     if (next.length === 0) return;
     const newest = next[next.length - 1].timestamp;
-    const prevNewest = frames.length ? frames[frames.length - 1].timestamp : null;
-    if (newest === prevNewest) return;
+    const prevNewest = newestObservedTs();
+    // A new forecast run is worth a rebuild even when no measurement landed.
+    const runOf = (adv) => (adv && adv.frames && adv.frames.length ? adv.run : null);
+    const newRun = runOf(res.data.forecast) !== runOf(forecast);
+    const measured = newest !== prevNewest;
+    if (!measured && !newRun) return;
     // A frame landed: what we just measured is an upper bound on this provider's real
     // publication delay (we only look at discrete moments), so decay it a little before
     // storing. Too-early wakes cost one RETRY_S hop and push the estimate back up.
-    lagS = Math.min(LAG_MAX_S, Math.max(LAG_MIN_S, nowS() - newest - LAG_DECAY_S));
+    if (measured) {
+      lagS = Math.min(LAG_MAX_S, Math.max(LAG_MIN_S, nowS() - newest - LAG_DECAY_S));
+    }
 
     const shownTs = frames[position]?.timestamp;
     gaps = res.data.gaps || [];
-    frames = next;
+    setFrames(next, res.data.forecast);
     retainCurrentLayer(); // keep the picture up until the new frame is ready
     setScrubberRange();
     renderGaps();
+    renderForecastTrack();
     // Following the live edge (the default state, and what the blinking pill
     // promises) ⇒ move to the frame that just landed. Without this the paused
     // default pins the cursor to whatever frame was showing when the page loaded:
     // the index keeps refreshing, the window-end label marches on, and the picture
     // silently rots for up to the whole 2 h window. Deliberately scrubbed back ⇒
     // stay on the chosen frame until it ages out of the window, then rejoin.
-    if (following) {
-      showFrame(frames.length - 1);
+    // A new forecast run alone lands no measurement, so the edge has not moved:
+    // the cursor stays put below, and a replay in progress plays on uninterrupted
+    // (runs arrive out of phase with measurements — jumping on both would yank it
+    // back to "now" twice per cadence).
+    if (following && measured) {
+      showFrame(observedCount - 1);
       return;
     }
+    // Same moment, whatever it now is: a forecast time that got measured meanwhile
+    // shows the measurement (its own layer — the cache is keyed by URL).
     const idx = frames.findIndex((f) => f.timestamp === shownTs);
     if (idx >= 0) {
       showFrame(idx);
       return;
     }
     setFollowing(true);
-    showFrame(frames.length - 1);
+    showFrame(observedCount - 1);
   }
 
   // When to look again. Anchored on the newest frame's OWN timestamp rather than on
@@ -571,9 +722,9 @@ export async function initRadar(
     const spaced = (intervalS + jitter) * 1000;
     if (backoffMs) return backoffMs;
     // No network happens in these states, so there is nothing to anchor to.
-    if (document.hidden || mode !== "live" || frames.length === 0) return spaced;
+    if (document.hidden || mode !== "live" || observedCount === 0) return spaced;
     const now = nowS();
-    const newest = frames[frames.length - 1].timestamp;
+    const newest = newestObservedTs(); // the forecast never moves the refresh anchor
     // Past the plausible publication window the frame is not merely late — the provider
     // has stalled or the archive has a gap. Stop hunting and fall back to cadence-spaced
     // polling, so a stall can never become a permanent RETRY_S poll.
@@ -612,26 +763,19 @@ export async function initRadar(
     scheduleRefresh();
   });
 
-  function setLiveButton(active) {
-    if (!liveBtn) return;
-    liveBtn.dataset.mode = active ? "live" : "archive";
-    // The pill is a toggle button, and "am I actually live?" is a state a screen
-    // reader must hear too — the blinking dot alone only reaches sighted users.
-    liveBtn.setAttribute("aria-pressed", active ? "true" : "false");
-  }
-
   // Single writer for the live-edge state, so the pill can never disagree with it.
   function setFollowing(v) {
     following = v;
-    setLiveButton(mode === "live" && following);
+    renderFrameState();
   }
 
-  // After a deliberate cursor move (scrub, step): landing on the newest frame
-  // re-arms following — dragging the scrubber to the far right is a legitimate way
-  // back to live. With no frames loaded there is no edge to be at, so leave it be.
+  // After a deliberate cursor move (scrub, step): landing on the newest MEASURED
+  // frame re-arms following — dragging the scrubber back onto the "now" tick is a
+  // legitimate way back to live; going past it into the forecast leaves LIVE. With no
+  // frames loaded there is no edge to be at, so leave it be.
   function syncFollowing() {
-    if (frames.length === 0) return;
-    setFollowing(position === frames.length - 1);
+    if (observedCount === 0) return;
+    setFollowing(position === observedCount - 1);
   }
 
   // -- public mode switches ---------------------------------------------------
@@ -648,7 +792,7 @@ export async function initRadar(
       return;
     }
     applyData(res.data);
-    if (frames.length) showFrame(frames.length - 1); // newest on load
+    if (observedCount) showFrame(observedCount - 1); // newest measurement on load
     resetRefresh();
   }
 
@@ -674,6 +818,9 @@ export async function initRadar(
     if (frames.length === 0) {
       showNodata(true);
       clearRadarLayer();
+      // No showFrame on this path: clear a forecast pill, tag and credit left over
+      // from a live cursor that was in the forecast.
+      renderFrameState();
       return;
     }
     // Position at the frame nearest the picked time-of-day.
@@ -753,6 +900,34 @@ export async function initRadar(
     }
   }
 
+  // -- forecast toggle (settings popover) -------------------------------------
+
+  // Show or hide the forecast part of the live timeline; persisted per browser. The
+  // measured part is a prefix of `frames`, so a cursor on a measurement keeps its
+  // index; a cursor in the forecast that is being hidden goes back to LIVE.
+  function setForecastVisible(on) {
+    forecastOn = !!on;
+    try {
+      localStorage.setItem("radar_forecast", forecastOn ? "1" : "0");
+    } catch {
+      /* storage blocked; the choice still applies this session */
+    }
+    if (mode !== "live") return;
+    const wasForecast = isForecast(position);
+    setFrames(frames.slice(0, observedCount), forecast);
+    retainCurrentLayer();
+    setScrubberRange();
+    renderGaps();
+    renderForecastTrack();
+    if (observedCount === 0) return;
+    if (wasForecast && !forecastOn) {
+      setFollowing(true);
+      showFrame(observedCount - 1);
+    } else {
+      showFrame(position);
+    }
+  }
+
   // Initial load: LIVE.
   const res = await fetchFrames();
   if (!res.ok) {
@@ -761,7 +936,7 @@ export async function initRadar(
     if (res.data.attribution) attribution = res.data.attribution;
     if (onAttribution && res.data.attribution) onAttribution(res.data.attribution);
     applyData(res.data);
-    if (frames.length) showFrame(frames.length - 1); // newest on load
+    if (observedCount) showFrame(observedCount - 1); // newest measurement on load
   }
   setFollowing(true);
   setPlayGlyph();
@@ -806,12 +981,22 @@ export async function initRadar(
     // For the lightning overlay: the bootstrap advert + a state snapshot to sync.
     lightning: lightningConfig,
     getState: radarState,
+    // For the settings popover's forecast row: is a forecast served at all (the row
+    // is hidden otherwise), which source it extends, and the persisted toggle.
+    forecastEnabled: () => !!(forecast && forecast.enabled),
+    getForecastVisible: () => forecastOn,
+    setForecastVisible,
+    // Language switch: the pill, the forecast label and the forecast credit are
+    // built here, not from [data-i18n].
+    refreshI18n: () => renderFrameState(),
     // For the video export: a pure, side-effect-free snapshot of the
     // inputs clip.js needs to recompose frames. clip.js applies the CLIP_WINDOW_S
-    // (2 h) cap relative to cursorTs itself.
+    // (2 h) cap relative to cursorTs itself. Forecast frames are never exported
+    // (product decision): they are dropped here, and a cursor in the forecast
+    // exports the window ending on the newest measurement.
     getExportData: () => ({
-      frames: frames.filter((_, i) => !inGap(i)), // ordered, gap frames removed
-      cursorTs: frames[position]?.timestamp, // current scrubber position
+      frames: frames.filter((f, i) => !f.forecast && !inGap(i)), // ordered, measured, no gaps
+      cursorTs: isForecast(position) ? newestObservedTs() : frames[position]?.timestamp,
       radarBounds, // L.LatLngBounds | null
       tileUrl, // (ts) => "/tiles/{provider}/{date}/{ts}/{z}/{x}/{y}.png"
       attribution, // provider credit (HTML) for the burned-in caption

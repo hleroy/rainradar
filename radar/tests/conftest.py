@@ -52,6 +52,8 @@ def _clean_state():
 
     from radar import cache  # noqa: PLC0415
     from radar import providers  # noqa: PLC0415
+    from radar.forecast import job as forecast_job  # noqa: PLC0415
+    from radar.forecast import render as forecast_render  # noqa: PLC0415
     from radar.providers import meteofrance_render  # noqa: PLC0415
     from radar.providers import rainviewer  # noqa: PLC0415
 
@@ -63,6 +65,9 @@ def _clean_state():
         # this, not just test_meteofrance_render.
         meteofrance_render._index_cache.clear()
         meteofrance_render._transformers.clear()
+        forecast_render._index_cache.clear()
+        forecast_job._failed_until.clear()
+        forecast_job._run_coverage.clear()
         # The 429 cooldown is a process-wide monotonic deadline: a test that trips it
         # would otherwise make every later upstream test fail fast.
         rainviewer.reset_cooldown()

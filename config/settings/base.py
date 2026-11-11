@@ -265,6 +265,46 @@ METEOFRANCE_POLL_INTERVAL = 60
 # METEOFRANCE_POLL_INTERVAL so the next poll is a real retry, not a cached failure.
 METEOFRANCE_FAILURE_COOLDOWN = 30
 
+# FORECAST — the 1-hour rain forecast (Météo-France PIAF)
+# ------------------------------------------------------------------------------
+# A fifth failure domain: its own archiver job, its own disk root, its own Redis
+# keys. See specs/forecast-nowcast.md (§8 has the measurements behind each value).
+# A per-deployment flag like METEOFRANCE_ENABLED, which it requires: it reuses that
+# provider's token holder and masks the forecast to its newest frame's coverage.
+# Dark by default and in dev — a run is 13 x 3.2 MB, ~12 GB a day of downloads.
+FORECAST_ENABLED = False
+# Not the radar API's host: PIAF lives on api.meteofrance.fr under /pro.
+FORECAST_API_BASE_URL = "https://api.meteofrance.fr/pro/piaf/1.0"
+FORECAST_WCS_SERVICE = "MF-NWP-HIGHRES-PIAF-001-FRANCE-WCS"
+# How far past the newest observed frame the forecast reaches (product decision).
+FORECAST_HORIZON_SECONDS = 3600
+# Lead 5 min is always already observed by the time its run lands, so the first
+# lead fetched is 10 min, and the last is horizon + 10 min: 13 per run.
+FORECAST_FIRST_LEAD_SECONDS = 600
+FORECAST_LEAD_STEP_SECONDS = 300
+# PIAF publishes one run every 5 min, 529-581 s after its reference time. Runs are
+# not probed before this delay, so the steady state costs ~3 small 404s per run.
+FORECAST_RUN_INTERVAL = 300
+FORECAST_PUBLICATION_DELAY = 480
+# The forecast job's tick: a probe of the expected next run (404 = not yet).
+FORECAST_POLL_INTERVAL = 20
+# Simultaneous lead downloads within one run (50 requests/min quota).
+FORECAST_DOWNLOAD_CONCURRENCY = 4
+# Complete runs kept on disk, so a client mid-animation never loses its tiles.
+FORECAST_RETAIN_RUNS = 3
+# Forecast tiles live beside the archive, never inside it: TILE_ROOT is immutable
+# per frame and swept by the janitor and the storage gauge; forecasts are disposable.
+FORECAST_ROOT = "/data/forecast"
+# No forecast is published masked to a coverage older than this (observation stalled).
+FORECAST_COVERAGE_MAX_AGE = 3600
+# A run that failed (not merely "not ready") is not retried for this long, so a
+# persistent failure costs a download a minute rather than one per tick.
+FORECAST_FAILURE_COOLDOWN = 60
+# The API stops advertising a run this old (run reference time to now). A run is
+# ~9 min old when it lands and the next is due ~5 min later, so 20 min tolerates
+# exactly one missed run: no forecast is better than a stale one shown as current.
+FORECAST_MAX_RUN_AGE = 1200
+
 # RADAR — durable archive
 # ------------------------------------------------------------------------------
 # Archiver: gates run_archiver; True *only* in the archiver container. A
@@ -400,7 +440,7 @@ PUSH_SUBS_REFRESH_SECONDS = 60  # evaluator refresh
 # of each concrete settings module (local/production) AFTER the flag is set, so
 # the check sees the final value — not base's dark default. Module-level (not a
 # Django system check) so they fire for uvicorn AND management commands.
-def require_meteofrance_credentials(*, enabled, application_id, reflectivity=False):
+def require_meteofrance_credentials(*, enabled, application_id, reflectivity=False, forecast=False):
     if enabled and not application_id:
         _msg = "METEOFRANCE_ENABLED requires METEOFRANCE_APPLICATION_ID."
         raise ImproperlyConfigured(_msg)
@@ -408,6 +448,10 @@ def require_meteofrance_credentials(*, enabled, application_id, reflectivity=Fal
     # nothing, since the whole Météo-France provider would be dark.
     if reflectivity and not enabled:
         _msg = "METEOFRANCE_REFLECTIVITY_ENABLED requires METEOFRANCE_ENABLED."
+        raise ImproperlyConfigured(_msg)
+    # The forecast shares the provider's token holder and its coverage mask.
+    if forecast and not enabled:
+        _msg = "FORECAST_ENABLED requires METEOFRANCE_ENABLED."
         raise ImproperlyConfigured(_msg)
 
 

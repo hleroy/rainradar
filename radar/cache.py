@@ -16,6 +16,7 @@ never serves stale state from another source.
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import TYPE_CHECKING
 
 import redis.asyncio as aioredis
@@ -54,6 +55,22 @@ ALERT_THROTTLE_PREFIX = "alerts:throttle:"
 ALERT_PUSH_SENT_KEY = "alerts:push_sent"
 ALERT_PUSH_FAILED_KEY = "alerts:push_failed"
 ALERT_PUSH_PRUNED_KEY = "alerts:push_pruned"
+
+# -- forecast -----------------------------------------------------------------
+# The published run as JSON {run, frames, coverage_ts, published_at}: set only after
+# every tile of that run is on disk, so a half-written run is never advertised. No
+# TTL and reconstructible — the forecast job rebuilds it from the newest run.json on
+# disk after a flush. Counters are best-effort operational stats.
+FORECAST_CURRENT_KEY = "forecast:current"
+FORECAST_COUNTERS = (
+    "not_ready",
+    "fetch_failed",
+    "rejected",
+    "crashed",
+    "bytes",
+    "runs_published",
+)
+_FORECAST_COUNTER_PREFIX = "forecast:count:"
 
 
 def get_client() -> aioredis.Redis:
@@ -384,6 +401,40 @@ async def incr_push_pruned(n: int = 1) -> int:
 async def get_push_pruned() -> int:
     raw = await get_client().get(ALERT_PUSH_PRUNED_KEY)
     return int(raw) if raw is not None else 0
+
+
+# -- forecast -------------------------------------------------------------------
+
+
+async def set_forecast_current(record: dict) -> None:
+    await get_client().set(FORECAST_CURRENT_KEY, json.dumps(record))
+
+
+async def get_forecast_current() -> dict | None:
+    """The published-run record, or ``None`` if absent or not a record with a run time.
+
+    Validated here, once, so no reader — the job, the advert, ``/metrics`` — can crash
+    on a mangled pointer. To the job ``None`` means "rebuild it from disk".
+    """
+    raw = await get_client().get(FORECAST_CURRENT_KEY)
+    if raw is None:
+        return None
+    try:
+        record = json.loads(raw)
+        int(record["run"])
+    except ValueError, KeyError, TypeError:
+        return None
+    return record
+
+
+async def incr_forecast(counter: str, n: int = 1) -> int:
+    return int(await get_client().incrby(f"{_FORECAST_COUNTER_PREFIX}{counter}", n))
+
+
+async def get_forecast_counters() -> dict[str, int]:
+    keys = [f"{_FORECAST_COUNTER_PREFIX}{c}" for c in FORECAST_COUNTERS]
+    raw = await get_client().mget(keys)
+    return {c: int(v) if v is not None else 0 for c, v in zip(FORECAST_COUNTERS, raw, strict=True)}
 
 
 # -- readiness ----------------------------------------------------------------
