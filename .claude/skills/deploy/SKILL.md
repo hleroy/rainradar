@@ -16,7 +16,11 @@ an **existing** `version`, which skips tests and redeploys that tag (rollback).
 `vX.Y.Z` version to cut (showing the latest existing tag and a sensible next bump),
 then trigger `deploy.yml` via **workflow_dispatch** on GitHub Actions with that
 `version` (+ `ref`, default `main`) — i.e. path (2) above. A new version cuts a fresh
-release; an existing version is a rollback. Watch the run to green, but remember the
+release; an existing version is a rollback. Leave `ref` at `main` once `main` is at the
+commit you mean to ship (`git fetch && git log -1 origin/main`) rather than typing a
+hash. Any branch, tag or commit — full or short SHA — is accepted: the `resolve` job
+pins it to one full SHA before the suite runs, so the commit tested is the commit
+tagged, and a bad ref fails in seconds instead of after the suite. Watch the run to green, but remember the
 green `deploy` job only means the webhook was **accepted** — the on-host build/migrate
 runs async (`journalctl -u webhook`), so don't claim production is updated from the
 Actions result alone.

@@ -2,7 +2,8 @@ name: Deploy
 
 # Three ways in:
 #   1. push a `vX.Y.Z` tag           -> test, then deploy that tag (local release cut)
-#   2. workflow_dispatch, NEW version -> test, create+push the tag from `ref`, deploy
+#   2. workflow_dispatch, NEW version -> resolve `ref` to one commit, test that commit,
+#                                        create+push the tag on it, deploy
 #                                        (the web-friendly path: no local tag push needed)
 #   3. workflow_dispatch, EXISTING    -> skip tests, redeploy the already-tested tag
 #                                        (rollback)
@@ -16,7 +17,7 @@ on:
         required: true
         type: string
       ref:
-        description: 'Branch or SHA to tag when cutting a NEW release. Ignored when the tag already exists. Defaults to main.'
+        description: 'Branch, tag or commit (full or short SHA) to release when cutting a NEW version. Resolved to one commit before the tests run, and that commit is what gets tested and tagged. Ignored when the tag already exists. Defaults to main.'
         required: false
         default: main
         type: string
@@ -32,17 +33,22 @@ concurrency:
 jobs:
   # Dispatch only: validate the version string and decide whether this is a
   # rollback (tag exists) or a new release cut (tag absent -> create from `ref`).
+  # For a new release, `ref` is resolved here to one full commit SHA, before the
+  # suite runs: the tests and the tag both use that SHA, so the tagged commit is
+  # exactly the tested one, and a ref that does not exist fails in seconds rather
+  # than after the whole suite (a short SHA used to reach the tag job's checkout,
+  # which cannot fetch one).
   resolve:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.r.outputs.tag }}
       exists: ${{ steps.r.outputs.exists }}
+      sha: ${{ steps.r.outputs.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 1
-          fetch-tags: true
+          fetch-depth: 0  # every branch, tag and commit, so any `ref` resolves locally
       - id: r
         # GitHub-controlled values arrive via env, never interpolated into the
         # script body — a crafted ref/version could otherwise run as a command.
@@ -54,16 +60,36 @@ jobs:
           if ! printf '%s' "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
             echo "::error::version '$VERSION' is not a vX.Y.Z release tag"; exit 1
           fi
+          echo "tag=$VERSION" >> "$GITHUB_OUTPUT"
           if git rev-parse -q --verify "refs/tags/${VERSION}" >/dev/null; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
+            exit 0  # rollback: `ref` is ignored
           fi
-          echo "tag=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "exists=false" >> "$GITHUB_OUTPUT"
+
+          # A ref name, never an option or a revision expression (`-x`, `@{…}`, `^`).
+          if ! printf '%s' "$REF" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._/-]*$'; then
+            echo "::error::ref is not a branch, tag or commit name"; exit 1
+          fi
+          sha=""
+          for candidate in "refs/remotes/origin/${REF}" "refs/tags/${REF}" "${REF}"; do
+            if resolved=$(git rev-parse -q --verify "${candidate}^{commit}"); then
+              sha=$resolved
+              break
+            fi
+          done
+          if [ -z "$sha" ]; then
+            echo "::error::ref '${REF}' is not a branch, tag or (unambiguous) commit of this repository"
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "Releasing $VERSION from $REF = $sha"
 
   # Re-run the full dockerized suite before any NEW tag is created or deployed:
   # every pushed tag, and dispatch runs that cut a new release. Rollbacks
   # (dispatch, existing tag) target an already-tested tag and skip this.
+  # A dispatch tests the commit `resolve` pinned, not the branch it was started
+  # from; a pushed tag (resolve skipped, `sha` empty) tests the tag itself.
   test:
     needs: [resolve]
     if: >-
@@ -71,6 +97,8 @@ jobs:
       (github.event_name == 'push' ||
        (github.event_name == 'workflow_dispatch' && needs.resolve.outputs.exists == 'false'))
     uses: ./.github/workflows/tests.yml
+    with:
+      ref: ${{ needs.resolve.outputs.sha }}
 
   # Dispatch only, new release: create + push the tag at `ref` AFTER tests pass,
   # so a tag never points at code that failed CI. Pushed with GITHUB_TOKEN, which
@@ -88,13 +116,17 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.ref }}   # checkout fails loudly if the ref is missing
+          ref: ${{ needs.resolve.outputs.sha }}  # the exact commit the suite just tested
       - name: Create and push tag
         env:
           TAG: ${{ needs.resolve.outputs.tag }}
+          SHA: ${{ needs.resolve.outputs.sha }}
         run: |
           set -euo pipefail
-          git tag "$TAG"
+          if [ "$(git rev-parse HEAD)" != "$SHA" ]; then
+            echo "::error::checked out $(git rev-parse HEAD), expected the tested $SHA"; exit 1
+          fi
+          git tag "$TAG" "$SHA"
           git push origin "refs/tags/${TAG}"
 
   deploy:

@@ -2,6 +2,12 @@ name: Tests
 
 on:
   workflow_call:
+    inputs:
+      ref:
+        description: 'Commit to test. Empty (ci.yml) tests the commit that triggered the run; deploy.yml passes the exact commit it is about to tag.'
+        required: false
+        type: string
+        default: ''
 
 # Dockerized for reproducibility — the same containerized path as `just pytest`.
 env:
@@ -12,6 +18,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
 
       # docker-compose.local.yml declares these two as `env_file`, and `.gitignore`
       # excludes `.envs/*` — a developer's real METEOFRANCE_APPLICATION_ID lives in
