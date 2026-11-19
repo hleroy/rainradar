@@ -78,7 +78,7 @@ services:
 
   redis:
     # Digest-pinned (tags are mutable); Dependabot refreshes it after its cooldown.
-    image: docker.io/redis:8.10@sha256:2c2dff791878316e3b083188be0d578423b24813cdda5de0e80ea4f7b3e6bfd6
+    image: docker.io/redis:8.10@sha256:1f88291b4c57bdf249f02eb085a8669889b2d2954e91d4de5118a5da6b78dd53
     # No persistence (RDB/AOF off): Redis holds only reconstructible cache state
     # — frames JSON, the archived set, the range cache, and gauges.
     command: redis-server --save "" --appendonly no
