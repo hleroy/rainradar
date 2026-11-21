@@ -1372,7 +1372,9 @@ The app **instruments only**. It emits:
   Blitzortung closes every connection after a few minutes), `ws_disconnected` (a
   failure — WARNING), `queue_overflow`, `batch_written`, `batch_failed`,
   `push_sent`, `push_failed`, `push_pruned`, `push_subscribed`, `push_unsubscribed`,
-  `forecast_published`, `forecast_run_failed`, `forecast_pruned`, plus the Météo-France pair
+  `forecast_published`, `forecast_run_failed`, `forecast_pruned`, `db_connection_discarded`
+  (WARNING — the archiver found its DB connection dropped by the server and closed it so
+  the next query reconnects; see `radar/db.py`), plus the Météo-France pair
   `frame_downloaded` / `frame_rendered`.
 - **Météo-France frame cost** decomposes via those last two. `poll_complete.duration_ms`
   is a whole poll — catalog GET, both product downloads, decode, render and the disk
