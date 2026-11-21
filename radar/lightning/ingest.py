@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING
 from django.conf import settings
 
 from radar import cache
+from radar.lightning.base import LightningSourceClosed
 from radar.lightning.base import LightningSourceError
 from radar.logging_json import emit
 from radar.models import LightningStrike
@@ -148,6 +149,35 @@ async def run_writer(queue: asyncio.Queue, *, stop: asyncio.Event | None = None)
 # -- WS read loop / supervisor ------------------------------------------------
 
 
+async def _record_session_end(
+    url: str, exc: LightningSourceError, connected_at: float | None
+) -> None:
+    """Drop the connected flag, count the reconnect, and log why the session ended.
+
+    A normal close by the peer (:class:`LightningSourceClosed`) is routine —
+    Blitzortung ends every connection after a few minutes — so it is an INFO
+    ``ws_closed`` carrying how long the session lasted. Anything else is a WARNING
+    ``ws_disconnected``.
+    """
+    await cache.set_ws_connected(False)
+    await cache.incr_reconnects()
+    if isinstance(exc, LightningSourceClosed):
+        connected_s = None if connected_at is None else round(time.monotonic() - connected_at)
+        emit(
+            logger,
+            logging.INFO,
+            "ws_closed",
+            service="lightning",
+            url=url,
+            reason=str(exc),
+            connected_s=connected_s,
+        )
+    else:
+        emit(
+            logger, logging.WARNING, "ws_disconnected", service="lightning", url=url, error=str(exc)
+        )
+
+
 async def run_ingest(  # noqa: PLR0913 — injectable bbox/urls/sleep/max_cycles keep it testable
     source: LightningSource,
     queue: asyncio.Queue,
@@ -172,9 +202,11 @@ async def run_ingest(  # noqa: PLR0913 — injectable bbox/urls/sleep/max_cycles
     while max_cycles is None or cycles < max_cycles:
         cycles += 1
         url = next(url_cycle)
+        connected_at: float | None = None
         try:
             async with source.connect(url) as strikes:
                 await cache.set_ws_connected(True, since=int(time.time()))
+                connected_at = time.monotonic()
                 backoff = settings.LIGHTNING_BACKOFF_MIN  # reset on a good connect
                 emit(logger, logging.INFO, "ws_connected", service="lightning", url=url)
                 async for strike in strikes:
@@ -194,16 +226,7 @@ async def run_ingest(  # noqa: PLR0913 — injectable bbox/urls/sleep/max_cycles
         except asyncio.CancelledError:
             raise  # clean shutdown
         except LightningSourceError as exc:
-            await cache.set_ws_connected(False)
-            await cache.incr_reconnects()
-            emit(
-                logger,
-                logging.WARNING,
-                "ws_disconnected",
-                service="lightning",
-                url=url,
-                error=str(exc),
-            )
+            await _record_session_end(url, exc, connected_at)
         except Exception:
             await cache.set_ws_connected(False)
             await cache.incr_reconnects()

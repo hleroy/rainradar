@@ -17,6 +17,8 @@ import pytest
 
 from radar.lightning import blitzortung
 from radar.lightning import get_active_source
+from radar.lightning.base import LightningSourceClosed
+from radar.lightning.base import LightningSourceError
 from radar.lightning.base import Strike
 
 
@@ -145,3 +147,45 @@ def test_attribution_mentions_blitzortung_with_link():
     attribution = get_active_source().attribution()
     assert "Blitzortung.org" in attribution
     assert "https://www.blitzortung.org" in attribution
+
+
+# -- connection end (the source contract: the stream never just stops) --------
+
+
+class _FakeWS:
+    """Stands in for a websockets connection: async-iterates ``frames``, then ends.
+
+    ``end`` is what happens after the last frame: ``None`` mimics a normal close
+    (websockets ends async-for silently on ConnectionClosedOK), an exception is
+    raised as websockets does for an abnormal close.
+    """
+
+    def __init__(self, frames, end=None, close_code=1000, close_reason=""):
+        self._frames = frames
+        self._end = end
+        self.close_code = close_code
+        self.close_reason = close_reason
+
+    async def __aiter__(self):
+        for frame in self._frames:
+            yield frame
+        if self._end is not None:
+            raise self._end
+
+
+async def test_clean_close_raises_source_closed_after_yielding_strikes():
+    source = get_active_source()
+    strikes = source._iter_strikes(_FakeWS([_frame()], close_code=1000, close_reason="bye"))
+    assert isinstance(await anext(strikes), Strike)  # strikes before the close still arrive
+    with pytest.raises(LightningSourceClosed, match=r"code 1000, reason 'bye'"):
+        await anext(strikes)
+
+
+async def test_abnormal_close_raises_plain_source_error():
+    import websockets  # noqa: PLC0415 — mirrors the adapter's lazy import
+
+    source = get_active_source()
+    strikes = source._iter_strikes(_FakeWS([], end=websockets.ConnectionClosedError(None, None)))
+    with pytest.raises(LightningSourceError) as excinfo:
+        await anext(strikes)
+    assert not isinstance(excinfo.value, LightningSourceClosed)

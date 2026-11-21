@@ -1368,7 +1368,9 @@ The app **instruments only**. It emits:
 - **Structured one-line JSON logs to stdout** in production, with canonical events:
   `poll_start`, `poll_complete`, `frame_archived`, `fetch_failed`, `frame_failed`,
   `gap_opened`, `gap_closed`, `retention_run`, `job_crashed`, `tile_fallback`,
-  `ws_connected`, `ws_disconnected`, `queue_overflow`, `batch_written`, `batch_failed`,
+  `ws_connected`, `ws_closed` (the peer ended the session normally — INFO, routine:
+  Blitzortung closes every connection after a few minutes), `ws_disconnected` (a
+  failure — WARNING), `queue_overflow`, `batch_written`, `batch_failed`,
   `push_sent`, `push_failed`, `push_pruned`, `push_subscribed`, `push_unsubscribed`,
   `forecast_published`, `forecast_run_failed`, `forecast_pruned`, plus the Météo-France pair
   `frame_downloaded` / `frame_rendered`.
