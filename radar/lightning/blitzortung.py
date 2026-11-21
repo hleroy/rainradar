@@ -25,6 +25,7 @@ import logging
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
+from radar.lightning.base import LightningSourceClosed
 from radar.lightning.base import LightningSourceError
 from radar.lightning.base import Strike
 from radar.logging_json import emit
@@ -143,6 +144,11 @@ class BlitzortungSource:
                     yield strike
         except websockets.ConnectionClosed as exc:
             raise LightningSourceError(str(exc)) from exc
+        # async-for ends *silently* on a normal close (ConnectionClosedOK) — which
+        # Blitzortung does to every connection after a few minutes. Surface it, or
+        # the supervisor reconnects with no log and a stale ws_connected flag.
+        msg = f"closed by peer (code {ws.close_code}, reason {ws.close_reason!r})"
+        raise LightningSourceClosed(msg)
 
     @asynccontextmanager
     async def connect(self, url: str) -> AsyncIterator[AsyncIterator[Strike]]:

@@ -374,9 +374,12 @@ UPSTREAM_RATE_LIMIT_COOLDOWN_MAX = 300.0
 # env, True only where the role runs.
 LIGHTNING_ENABLED = env.bool("LIGHTNING_ENABLED", default=False)
 LIGHTNING_SOURCE = "blitzortung"
+# Only hosts that present a certificate for their own name. ws7 (like ws4-ws6, ws9,
+# ws10) is a DNS alias of a shared Blitzortung server that serves the
+# maps.blitzortung.org certificate, so TLS correctly rejects it every time; it cost
+# one failed connect per rotation. Never "fix" a host by disabling verification.
 BLITZORTUNG_WS_URLS = [
     "wss://ws1.blitzortung.org",
-    "wss://ws7.blitzortung.org",
     "wss://ws8.blitzortung.org",
 ]
 # S,N,W,E ingest + history filter; matches the radar bbox.

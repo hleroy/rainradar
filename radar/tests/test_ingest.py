@@ -10,12 +10,14 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 from unittest.mock import AsyncMock
 
 import pytest
 from django.conf import settings
 
 from radar import cache
+from radar.lightning.base import LightningSourceClosed
 from radar.lightning.base import LightningSourceError
 from radar.lightning.base import Strike
 from radar.lightning.ingest import enqueue_drop_oldest
@@ -255,3 +257,35 @@ async def test_run_ingest_recovers_after_a_drop():
 
     assert queue.qsize() == 1
     assert await cache.get_reconnects() >= 1
+
+
+async def test_run_ingest_logs_a_clean_close_as_info_not_a_disconnect(caplog):
+    # The peer ends the session normally: a routine reconnect, logged at INFO as
+    # ws_closed (with how long it lasted), never as a WARNING ws_disconnected.
+    closed = LightningSourceClosed("closed by peer (code 1000, reason '')")
+    source = FakeSource([closed])
+    queue: asyncio.Queue = asyncio.Queue(maxsize=10)
+    with caplog.at_level(logging.INFO, logger="radar.lightning"):
+        await run_ingest(source, queue, sleep=AsyncMock(), max_cycles=1)
+
+    events = {getattr(r, "event", None): r for r in caplog.records}
+    assert "ws_disconnected" not in events
+    rec = events["ws_closed"]
+    assert rec.levelno == logging.INFO
+    assert rec.url == source.connect_urls[0]
+    assert rec.reason == str(closed)
+    assert rec.connected_s == 0  # connected, then closed straight away
+    assert await cache.get_ws_connected() == 0
+    assert await cache.get_reconnects() == 1  # still a reconnect
+
+
+async def test_run_ingest_logs_a_failure_as_a_warning_disconnect(caplog):
+    source = FakeSource([LightningSourceError("TLS handshake failed")])
+    queue: asyncio.Queue = asyncio.Queue(maxsize=10)
+    with caplog.at_level(logging.INFO, logger="radar.lightning"):
+        await run_ingest(source, queue, sleep=AsyncMock(), max_cycles=1)
+
+    events = {getattr(r, "event", None): r for r in caplog.records}
+    assert "ws_closed" not in events
+    assert events["ws_disconnected"].levelno == logging.WARNING
+    assert events["ws_disconnected"].error == "TLS handshake failed"

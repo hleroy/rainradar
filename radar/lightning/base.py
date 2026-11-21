@@ -41,6 +41,15 @@ class LightningSourceError(Exception):
     """The connection dropped or became unusable; the supervisor reconnects."""
 
 
+class LightningSourceClosed(LightningSourceError):
+    """The peer ended the connection normally; the supervisor reconnects.
+
+    A routine server-side close is not a failure. It gets its own subclass so the
+    supervisor can log it at INFO instead of as a WARNING ``ws_disconnected``, but it
+    is still a ``LightningSourceError``: a stream never just ends silently.
+    """
+
+
 @runtime_checkable
 class LightningSource(Protocol):
     """A swappable lightning data source."""
@@ -55,6 +64,8 @@ class LightningSource(Protocol):
         """Open ONE connection; yield an async iterator of decoded, bbox-unfiltered strikes.
 
         Used as ``async with source.connect(url) as strikes: async for s in strikes``.
-        Raises :class:`LightningSourceError` when the connection ends or fails.
+        Raises :class:`LightningSourceError` when the connection ends or fails —
+        :class:`LightningSourceClosed` when the peer closed it normally. The strike
+        iterator must never simply stop: a silent end hides the close from the logs.
         """
         ...
