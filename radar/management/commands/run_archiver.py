@@ -20,6 +20,7 @@ from django.conf import settings
 from django.core.management.base import BaseCommand
 
 from radar import archiver
+from radar.db import discard_unusable_connections
 from radar.logging_json import emit
 from radar.models import RadarFrame
 from radar.providers import enabled_providers
@@ -200,6 +201,7 @@ async def _safe(job, name: str):
     except Exception:
         emit(logger, logging.ERROR, "job_crashed", job=name)
         logger.exception("archiver job %s crashed", name)
+        await discard_unusable_connections()  # a dropped DB connection must not stick
         return None
 
 
@@ -219,6 +221,9 @@ async def _supervise(coro_fn, *args) -> None:
             name = getattr(coro_fn, "__name__", "?")
             emit(logger, logging.ERROR, "lightning_task_crashed", service="lightning")
             logger.exception("lightning task %s crashed; restarting", name)
+            # Reconnect before the restart if the crash was Postgres dropping the
+            # connection; otherwise the task crash-loops on a dead one forever.
+            await discard_unusable_connections()
             await asyncio.sleep(1.0)
         else:
             return  # clean completion (e.g. stop set) — don't restart

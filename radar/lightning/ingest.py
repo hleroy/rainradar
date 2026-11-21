@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING
 from django.conf import settings
 
 from radar import cache
+from radar.db import discard_unusable_connections
 from radar.lightning.base import LightningSourceClosed
 from radar.lightning.base import LightningSourceError
 from radar.logging_json import emit
@@ -113,6 +114,9 @@ async def persist_and_fanout(strikes: list[Strike]) -> int:
     except Exception:
         emit(logger, logging.ERROR, "batch_failed", service="lightning", n=len(strikes))
         logger.exception("lightning batch write of %d strikes failed", len(strikes))
+        # The writer survives DB errors by design, so it never reaches _supervise:
+        # drop a dead connection here, or every later batch fails the same way.
+        await discard_unusable_connections()
         return 0
 
     # Fan-out for live SSE + late-joiner replay: still one PUBLISH per strike
