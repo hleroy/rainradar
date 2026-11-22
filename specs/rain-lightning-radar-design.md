@@ -1366,15 +1366,21 @@ management commands rather than letting a misconfigured deployment start looking
 
 The app **instruments only**. It emits:
 
-- **`GET /metrics`** — hand-rolled Prometheus text (no client dependency): archived frame
-  counts total / 24 h / partial / failed, per-provider frame counts and last-poll epochs,
-  gap totals and an open-gap flag, archive bounds, tile-directory bytes and used ratio;
-  lightning strike totals / 24 h / archived rows, WS connected flag and uptime, reconnects,
-  queue drops, last-strike epoch, partition count; push subscription count with
-  sent / failed / pruned counters; and, when the forecast is enabled, the published
-  run's reference time, publication time and lag (`forecast_run_timestamp`,
+- **`GET /metrics`** — hand-rolled Prometheus text (no client dependency). Radar series are
+  all labelled `{provider="…"}` (enabled providers only, with no unlabelled twin, so
+  `sum()`/`max()` never double-count): stored frame rows by `status` (`ok` / `partial` /
+  `failed`, zero-filled), frames archived in 24 h, gap rows and an open-gap flag,
+  last-poll epoch and archive bounds; tile-directory bytes and used ratio are global.
+  Lightning: strikes ingested (counter) / 24 h / rows stored, WS connected flag and
+  uptime, reconnects, queue drops, last-strike epoch, partition count. Push: subscription
+  count with sent / failed / pruned counters. When the forecast is enabled, the
+  published run's reference time, publication time and lag (`forecast_run_timestamp`,
   `forecast_published_timestamp`, `forecast_publication_lag_seconds`) plus its
   not-ready / fetch-failed / rejected / bytes / runs-published counters.
+  Naming follows Prometheus conventions, pinned by a test: `_total` marks **counters
+  only** (Redis-held, so they reset when Redis restarts, which `rate()` handles). Row
+  counts are gauges named `_stored` or plain, never `_total`, because retention prunes
+  them nightly and a dropping `_total` series reads as a counter reset.
 - **Structured one-line JSON logs to stdout** in production, with canonical events:
   `poll_start`, `poll_complete`, `frame_archived`, `fetch_failed`, `frame_failed`,
   `gap_opened`, `gap_closed`, `retention_run`, `job_crashed`, `tile_fallback`,

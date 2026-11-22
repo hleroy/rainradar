@@ -12,6 +12,7 @@ from datetime import datetime
 from datetime import timedelta
 
 from django.conf import settings
+from django.db.models import Count
 from django.db.models import Max
 from django.db.models import Min
 
@@ -25,83 +26,114 @@ from radar.providers import enabled_providers
 
 CONTENT_TYPE = "text/plain; version=0.0.4"
 
+# Frame statuses, always emitted (zero-filled) so a series never vanishes mid-graph.
+_FRAME_STATUSES = ("ok", "partial", "failed")
+
+# Naming rules (Prometheus conventions — keep them when adding a series):
+# - ``_total`` only on true counters (monotonic; they reset on a Redis restart, which
+#   ``rate()`` handles). Row counts are gauges WITHOUT ``_total``: retention prunes
+#   them nightly, and a ``_total`` gauge that drops reads as a counter reset.
+# - Every series that differs per radar provider carries ``{provider="…"}`` and has
+#   no unlabelled twin, so ``sum()``/``max()`` over the label never double-counts.
+
+
+def _gauge(name: str, help_text: str, samples: list[tuple[str, object]]) -> list[str]:
+    """One gauge family: HELP/TYPE header plus ``(labels, value)`` samples."""
+    return [
+        f"# HELP {name} {help_text}",
+        f"# TYPE {name} gauge",
+        *(f"{name}{labels} {value}" for labels, value in samples),
+    ]
+
+
+def _provider(name: str) -> str:
+    return f'{{provider="{name}"}}'
+
 
 async def render() -> str:
     """Assemble the Prometheus exposition text."""
     day_ago = datetime.now(tz=UTC) - timedelta(hours=24)
+    providers = enabled_providers()
 
-    total = await RadarFrame.objects.acount()
-    frames_24h = await RadarFrame.objects.filter(collected_at__gte=day_ago).acount()
-    partial = await RadarFrame.objects.filter(status="partial").acount()
-    failed = await RadarFrame.objects.filter(status="failed").acount()
-    gaps_total = await ArchiveGap.objects.filter(service="radar").acount()
-    gap_open = await ArchiveGap.objects.filter(service="radar", gap_end__isnull=True).aexists()
-    bounds = await RadarFrame.objects.aaggregate(lo=Min("timestamp"), hi=Max("timestamp"))
-    earliest = bounds["lo"] or 0
-    latest = bounds["hi"] or 0
+    # Scoped to the enabled providers so the series set is stable: a disabled
+    # provider's leftover rows (until retention prunes them) never add series.
+    frames = RadarFrame.objects.filter(provider__in=providers)
+    stored: dict[tuple[str, str], int] = {
+        (name, status): 0 for name in providers for status in _FRAME_STATUSES
+    }
+    async for row in frames.values("provider", "status").annotate(n=Count("id")):
+        stored[row["provider"], row["status"]] = row["n"]
+    last_24h = dict.fromkeys(providers, 0)
+    recent = frames.filter(collected_at__gte=day_ago)
+    async for row in recent.values("provider").annotate(n=Count("id")):
+        last_24h[row["provider"]] = row["n"]
+    bounds = dict.fromkeys(providers, (0, 0))
+    async for row in frames.values("provider").annotate(lo=Min("timestamp"), hi=Max("timestamp")):
+        bounds[row["provider"]] = (row["lo"] or 0, row["hi"] or 0)
+    radar_gaps = ArchiveGap.objects.filter(service="radar", provider__in=providers)
+    gaps = dict.fromkeys(providers, 0)
+    async for row in radar_gaps.values("provider").annotate(n=Count("id")):
+        gaps[row["provider"]] = row["n"]
+    open_gaps = dict.fromkeys(providers, 0)
+    async for name in radar_gaps.filter(gap_end__isnull=True).values_list("provider", flat=True):
+        open_gaps[name] = 1
+    last_poll = {name: await cache.get_last_poll(name) for name in providers}
 
     tile_bytes = await cache.get_tile_dir_bytes()
-    last_poll = await cache.get_last_poll()
     capacity = settings.STORAGE_CAPACITY_BYTES
     used_ratio = (tile_bytes / capacity) if capacity else 0.0
 
-    # Per-provider archived counts + last-poll epochs. The unlabelled series
-    # above stay for dashboard continuity; these add a {provider="…"} dimension.
-    provider_names = enabled_providers()
-    frames_by_provider: dict[str, int] = {}
-    poll_by_provider: dict[str, int] = {}
-    for name in provider_names:
-        frames_by_provider[name] = await RadarFrame.objects.filter(provider=name).acount()
-        poll_by_provider[name] = await cache.get_last_poll(name)
-
-    lightning = await _lightning_series(day_ago)
-
     lines = [
-        "# HELP radar_frames_total Total archived radar frames.",
-        "# TYPE radar_frames_total gauge",
-        f"radar_frames_total {total}",
-        "# HELP radar_frames_24h Frames archived in the last 24h.",
-        "# TYPE radar_frames_24h gauge",
-        f"radar_frames_24h {frames_24h}",
-        "# HELP radar_frames_partial_total Frames with status=partial.",
-        "# TYPE radar_frames_partial_total gauge",
-        f"radar_frames_partial_total {partial}",
-        "# HELP radar_frames_failed_total Frames with status=failed.",
-        "# TYPE radar_frames_failed_total gauge",
-        f"radar_frames_failed_total {failed}",
-        "# HELP radar_archive_gaps_total All-time gap rows.",
-        "# TYPE radar_archive_gaps_total gauge",
-        f"radar_archive_gaps_total {gaps_total}",
-        "# HELP radar_archive_gap_open 1 if any gap is currently open.",
-        "# TYPE radar_archive_gap_open gauge",
-        f"radar_archive_gap_open {1 if gap_open else 0}",
-        "# HELP radar_tile_dir_bytes Tile archive size on disk (bytes).",
-        "# TYPE radar_tile_dir_bytes gauge",
-        f"radar_tile_dir_bytes {tile_bytes}",
-        "# HELP radar_storage_used_ratio tile_dir_bytes / STORAGE_CAPACITY_BYTES.",
-        "# TYPE radar_storage_used_ratio gauge",
-        f"radar_storage_used_ratio {used_ratio:.6f}",
-        "# HELP radar_last_poll_timestamp Epoch of the last successful poll.",
-        "# TYPE radar_last_poll_timestamp gauge",
-        f"radar_last_poll_timestamp {last_poll}",
-        *(
-            f'radar_last_poll_timestamp{{provider="{name}"}} {poll_by_provider[name]}'
-            for name in provider_names
+        *_gauge(
+            "radar_frames_stored",
+            "Radar frame rows currently stored, by provider and status (retention prunes).",
+            [
+                (f'{{provider="{name}",status="{status}"}}', n)
+                for (name, status), n in sorted(stored.items())
+            ],
         ),
-        "# HELP radar_archive_earliest_timestamp Oldest archived frame epoch (0 if empty).",
-        "# TYPE radar_archive_earliest_timestamp gauge",
-        f"radar_archive_earliest_timestamp {earliest}",
-        "# HELP radar_archive_latest_timestamp Newest archived frame epoch (0 if empty).",
-        "# TYPE radar_archive_latest_timestamp gauge",
-        f"radar_archive_latest_timestamp {latest}",
-        "# HELP radar_frames_archived_total Archived frames per provider.",
-        "# TYPE radar_frames_archived_total gauge",
-        *(
-            f'radar_frames_archived_total{{provider="{name}"}} {frames_by_provider[name]}'
-            for name in provider_names
+        *_gauge(
+            "radar_frames_24h",
+            "Frames archived in the last 24h.",
+            [(_provider(name), n) for name, n in last_24h.items()],
+        ),
+        *_gauge(
+            "radar_archive_gaps",
+            "Gap rows recorded (open and closed).",
+            [(_provider(name), n) for name, n in gaps.items()],
+        ),
+        *_gauge(
+            "radar_archive_gap_open",
+            "1 if a gap is currently open.",
+            [(_provider(name), flag) for name, flag in open_gaps.items()],
+        ),
+        *_gauge(
+            "radar_last_poll_timestamp",
+            "Epoch of the last successful poll (0 if none).",
+            [(_provider(name), ts) for name, ts in last_poll.items()],
+        ),
+        *_gauge(
+            "radar_archive_earliest_timestamp",
+            "Oldest archived frame epoch (0 if empty).",
+            [(_provider(name), lo) for name, (lo, _hi) in bounds.items()],
+        ),
+        *_gauge(
+            "radar_archive_latest_timestamp",
+            "Newest archived frame epoch (0 if empty).",
+            [(_provider(name), hi) for name, (_lo, hi) in bounds.items()],
+        ),
+        *_gauge(
+            "radar_tile_dir_bytes",
+            "Tile archive size on disk, all providers (bytes).",
+            [("", tile_bytes)],
+        ),
+        *_gauge(
+            "radar_storage_used_ratio",
+            "tile_dir_bytes / STORAGE_CAPACITY_BYTES.",
+            [("", f"{used_ratio:.6f}")],
         ),
     ]
-    lines += lightning
+    lines += await _lightning_series(day_ago)
     lines += await _alert_series()
     if settings.FORECAST_ENABLED:
         lines += await _forecast_series()
@@ -179,7 +211,7 @@ async def _lightning_series(day_ago: datetime) -> list[str]:
 
     # Cheap DB counts; partition_count is Postgres-only, so degrade to 0 elsewhere.
     strikes_24h = await LightningStrike.objects.filter(struck_at__gte=day_ago).acount()
-    archived_total = await LightningStrike.objects.acount()
+    strikes_stored = await LightningStrike.objects.acount()
     try:
         partitions_total = await lightning_partitions.partition_count()
     except Exception:  # noqa: BLE001 — non-Postgres / table not ready: report 0
@@ -192,9 +224,9 @@ async def _lightning_series(day_ago: datetime) -> list[str]:
         "# HELP lightning_strikes_24h Strikes with struck_at in the last 24h.",
         "# TYPE lightning_strikes_24h gauge",
         f"lightning_strikes_24h {strikes_24h}",
-        "# HELP lightning_archived_total Total rows in lightning_strike.",
-        "# TYPE lightning_archived_total gauge",
-        f"lightning_archived_total {archived_total}",
+        "# HELP lightning_strikes_stored Rows currently in lightning_strike (retention prunes).",
+        "# TYPE lightning_strikes_stored gauge",
+        f"lightning_strikes_stored {strikes_stored}",
         "# HELP lightning_ws_connected 1 if the Blitzortung WS is currently up.",
         "# TYPE lightning_ws_connected gauge",
         f"lightning_ws_connected {ws_connected}",
@@ -210,7 +242,7 @@ async def _lightning_series(day_ago: datetime) -> list[str]:
         "# HELP lightning_last_strike_timestamp Epoch of the newest ingested strike (0 if none).",
         "# TYPE lightning_last_strike_timestamp gauge",
         f"lightning_last_strike_timestamp {last_strike}",
-        "# HELP lightning_partitions_total Attached monthly partitions (excl. default).",
-        "# TYPE lightning_partitions_total gauge",
-        f"lightning_partitions_total {partitions_total}",
+        "# HELP lightning_partitions Attached monthly partitions (excl. default).",
+        "# TYPE lightning_partitions gauge",
+        f"lightning_partitions {partitions_total}",
     ]
