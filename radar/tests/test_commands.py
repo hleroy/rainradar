@@ -6,6 +6,8 @@ tests drive the commands exactly as the CLI does (``handle`` → ``asyncio.run``
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import re
 from io import StringIO
 from unittest.mock import AsyncMock
@@ -31,6 +33,15 @@ TILE_RE = re.compile(r"https://tilecache\.rainviewer\.com/.+\.png$")
 def tile_root(tmp_path):
     with override_settings(TILE_ROOT=str(tmp_path)):
         yield tmp_path
+
+
+@pytest.fixture(autouse=True)
+def fake_storage_gauge(monkeypatch):
+    """The bootstrap fires the full-rescan gauge as a background task; stub it so a
+    task outliving a test's ``override_settings`` never walks the real TILE_ROOT."""
+    gauge = AsyncMock(return_value=0)
+    monkeypatch.setattr(run_archiver.archiver, "update_storage_gauge", gauge)
+    return gauge
 
 
 def test_run_archiver_guard_disabled_exits_cleanly():
@@ -136,8 +147,61 @@ async def test_run_starts_lightning_when_enabled(monkeypatch, tile_root):
 
     assert "partition_maint" in jobs  # daily month pre-creation scheduled
     assert {"poll_radar", "retention_janitor", "partition_maint"} == set(jobs)
-    assert len(created) == 2  # supervised ingest + writer tasks
+    assert len(created) == 3  # background storage-gauge rescan + ingest + writer tasks
     ensure_mock.assert_awaited()  # partitions ensured before ingest
+
+
+async def test_startup_poll_does_not_wait_for_the_storage_rescan(monkeypatch, tile_root):
+    """A cold-cache rescan takes minutes after a reboot; Météo-France only exposes its
+    latest frame, so gating the first poll on it loses frames for good."""
+    released = asyncio.Event()
+    calls: list[str] = []
+
+    async def slow_gauge():
+        calls.append("gauge_started")
+        await released.wait()  # never set: the rescan is still "walking"
+        calls.append("gauge_done")
+        return 0
+
+    async def fake_poll(*_a, **_k):
+        calls.append("poll")
+        return {"frames_seen": 0, "archived": 0, "tiles_written": 0, "ok": True}
+
+    class FakeScheduler:
+        def __init__(self, **_kw):
+            pass
+
+        def add_job(self, *_a, **_kw):
+            pass
+
+        def start(self):
+            calls.append("scheduler_started")
+
+    class FakeEvent:
+        async def wait(self):
+            await asyncio.sleep(0)  # let the background gauge task begin
+
+    monkeypatch.setattr(run_archiver.archiver, "update_storage_gauge", slow_gauge)
+    monkeypatch.setattr(run_archiver.archiver, "poll_radar", fake_poll)
+    monkeypatch.setattr(run_archiver, "AsyncIOScheduler", FakeScheduler)
+    monkeypatch.setattr(run_archiver.asyncio, "Event", FakeEvent)
+
+    cmd = run_archiver.Command()
+    with override_settings(
+        ARCHIVER_ENABLED=True, LIGHTNING_ENABLED=False, METEOFRANCE_ENABLED=False
+    ):
+        await asyncio.wait_for(cmd._run(), timeout=5)
+
+    try:
+        assert calls[0] == "poll"  # the catch-up poll ran first, not after the rescan
+        assert "scheduler_started" in calls
+        assert "gauge_started" in calls
+        assert "gauge_done" not in calls
+        assert not cmd._gauge_task.done()  # still running in the background
+    finally:
+        cmd._gauge_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await cmd._gauge_task
 
 
 async def test_run_schedules_meteofrance_job_when_enabled(monkeypatch, tile_root):

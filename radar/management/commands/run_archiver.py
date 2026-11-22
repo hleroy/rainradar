@@ -47,10 +47,6 @@ class Command(BaseCommand):
     async def _run(self) -> None:
         await self._wait_for_db()
 
-        # Set the storage gauge's absolute baseline once (full rescan) so the
-        # per-poll increments start from the real on-disk size after a restart.
-        await _safe(archiver.update_storage_gauge, "update_storage_gauge")
-
         # Catch up immediately on startup (post-restart backfill self-heals
         # sub-window outages), then schedule the recurring jobs.
         await _safe(archiver.poll_radar, "poll_radar")
@@ -61,6 +57,15 @@ class Command(BaseCommand):
         mf_provider = get_provider("meteofrance") if settings.METEOFRANCE_ENABLED else None
         if mf_provider is not None:
             await _safe(lambda: archiver.poll_radar(mf_provider), "poll_radar_meteofrance")
+
+        # Set the storage gauge's absolute baseline (full rescan) in the background.
+        # It must never gate the first poll: on a cold page cache (post-reboot) the
+        # walk takes minutes, and Météo-France only exposes its latest frame, so a
+        # blocked startup loses frames for good. Increments from polls that land
+        # mid-scan may drift the gauge slightly; the daily janitor rescan reconciles.
+        self._gauge_task = asyncio.create_task(
+            _safe(archiver.update_storage_gauge, "update_storage_gauge"),
+        )
 
         # Lightning ingester: only here, only when LIGHTNING_ENABLED, so
         # exactly one WS consumer exists (never scale this container). It runs as

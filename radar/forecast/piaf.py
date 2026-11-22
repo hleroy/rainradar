@@ -112,7 +112,7 @@ class PiafSource:
                 msg = "Météo-France token unavailable"
                 raise ForecastUnavailable(msg) from exc
             except (httpx.TimeoutException, httpx.TransportError) as exc:
-                logger.warning("PIAF download error: %s", exc)
+                logger.warning("PIAF download error: %r", exc)
             else:
                 status = resp.status_code
                 if status == httpx.codes.OK:

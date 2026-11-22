@@ -660,6 +660,16 @@ Runs daily at `JANITOR_HOUR` UTC and is safe as a no-op:
 The lightning and push clauses are individually caught and logged: a failure in either
 must never fail radar retention.
 
+The two filesystem walks — the day-directory `rmtree` and the gauge rescan — take minutes
+on a large or cold archive, so they run in `asyncio.to_thread`, **never** through
+`sync_to_async`. Its default `thread_sensitive` mode funnels every call onto one shared
+thread, and every tile check/write and async ORM call (lightning inserts included) queues
+there; a walk holding it stalls every poll, the forecast and lightning ingest. For the
+same reason the archiver's startup rescan, which sets the gauge's absolute baseline, runs
+as a background task after the catch-up polls rather than before them: after a reboot,
+Météo-France exposes only its latest frame, so a startup gated on a cold-cache walk loses
+frames for good.
+
 ---
 
 ## 8. Lightning
