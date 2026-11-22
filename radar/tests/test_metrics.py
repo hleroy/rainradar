@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
+import re
 from datetime import UTC
 from datetime import datetime
+from unittest.mock import AsyncMock
 
 import pytest
+from django.conf import settings
 from django.test import override_settings
 
 from radar import cache
+from radar import metrics
 from radar.models import ArchiveGap
 from radar.models import LightningStrike
 from radar.models import RadarFrame
@@ -235,3 +240,64 @@ async def test_forecast_series_before_any_run(async_client):
     values = _parse((await async_client.get("/metrics")).content.decode())
     assert values["forecast_run_timestamp"] == "0"
     assert values["forecast_publication_lag_seconds"] == "0"
+
+
+# -- cached, single-flight exposition ----------------------------------------------
+
+
+def _counting_render(monkeypatch, delay: float = 0.0) -> list[int]:
+    calls: list[int] = []
+
+    async def fake_render() -> str:
+        calls.append(1)
+        await asyncio.sleep(delay)  # a slow render widens the stampede window
+        return f"render {len(calls)}\n"
+
+    monkeypatch.setattr(metrics, "render", fake_render)
+    return calls
+
+
+async def test_concurrent_misses_render_once(monkeypatch):
+    """Cache expiry under load: every concurrent request used to run its own render."""
+    calls = _counting_render(monkeypatch, delay=0.05)
+    results = await asyncio.gather(*(metrics.exposition() for _ in range(20)))
+    assert len(calls) == 1
+    assert set(results) == {b"render 1\n"}
+
+
+async def test_redis_down_still_renders_once_per_ttl(monkeypatch):
+    """With Redis down every request used to hit Postgres; the memo bounds it."""
+    calls = _counting_render(monkeypatch)
+
+    async def redis_down(*_a, **_k):
+        raise ConnectionError("redis unavailable")
+
+    monkeypatch.setattr(cache, "get_metrics_text", redis_down)
+    monkeypatch.setattr(cache, "set_metrics_text", redis_down)
+    for _ in range(5):
+        assert await metrics.exposition() == b"render 1\n"
+    assert len(calls) == 1
+
+
+async def test_memo_expires_after_the_ttl(monkeypatch):
+    calls = _counting_render(monkeypatch)
+    monkeypatch.setattr(cache, "get_metrics_text", AsyncMock(return_value=None))
+    now = [1000.0]
+    monkeypatch.setattr(metrics, "_clock", lambda: now[0])
+    with override_settings(METRICS_CACHE_TTL=30):
+        assert await metrics.exposition() == b"render 1\n"
+        now[0] += 29
+        assert await metrics.exposition() == b"render 1\n"
+        now[0] += 2  # past the TTL
+        assert await metrics.exposition() == b"render 2\n"
+    assert len(calls) == 2
+
+
+async def test_nginx_rate_limits_metrics():
+    """The render is expensive and the endpoint public: Nginx throttles it too."""
+    conf = (settings.BASE_DIR / "compose" / "production" / "nginx" / "default.conf").read_text()
+    block = re.search(r"location = /metrics \{(.*?)\n  \}", conf, re.DOTALL)
+    assert block, "no /metrics location in the prod Nginx config"
+    assert re.search(r"limit_req zone=metrics_rl\b", block.group(1))
+    assert re.search(r"limit_req zone=api_global\b", block.group(1))
+    assert re.search(r"limit_req_zone \$binary_remote_addr zone=metrics_rl:", conf)
