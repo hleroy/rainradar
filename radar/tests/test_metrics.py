@@ -16,29 +16,29 @@ from radar.models import RadarFrame
 pytestmark = [pytest.mark.asyncio, pytest.mark.django_db(transaction=True)]
 
 EXPECTED_SERIES = {
-    "radar_frames_total",
-    "radar_frames_24h",
-    "radar_frames_partial_total",
-    "radar_frames_failed_total",
-    "radar_archive_gaps_total",
-    "radar_archive_gap_open",
+    'radar_frames_stored{provider="rainviewer",status="ok"}',
+    'radar_frames_stored{provider="rainviewer",status="partial"}',
+    'radar_frames_stored{provider="rainviewer",status="failed"}',
+    'radar_frames_24h{provider="rainviewer"}',
+    'radar_archive_gaps{provider="rainviewer"}',
+    'radar_archive_gap_open{provider="rainviewer"}',
+    'radar_last_poll_timestamp{provider="rainviewer"}',
+    'radar_archive_earliest_timestamp{provider="rainviewer"}',
+    'radar_archive_latest_timestamp{provider="rainviewer"}',
     "radar_tile_dir_bytes",
     "radar_storage_used_ratio",
-    "radar_last_poll_timestamp",
-    "radar_archive_earliest_timestamp",
-    "radar_archive_latest_timestamp",
 }
 
 EXPECTED_LIGHTNING_SERIES = {
     "lightning_strikes_total",
     "lightning_strikes_24h",
-    "lightning_archived_total",
+    "lightning_strikes_stored",
     "lightning_ws_connected",
     "lightning_ws_uptime_seconds",
     "lightning_ws_reconnects_total",
     "lightning_queue_dropped_total",
     "lightning_last_strike_timestamp",
-    "lightning_partitions_total",
+    "lightning_partitions",
 }
 
 
@@ -52,6 +52,14 @@ def _parse(text: str) -> dict[str, str]:
     return values
 
 
+def _types(text: str) -> dict[str, str]:
+    """``{family: type}`` from the ``# TYPE`` lines."""
+    return {
+        parts[2]: parts[3]
+        for parts in (line.split() for line in text.splitlines() if line.startswith("# TYPE "))
+    }
+
+
 async def test_metrics_content_type_and_series(async_client):
     resp = await async_client.get("/metrics")
     assert resp.status_code == 200
@@ -59,6 +67,34 @@ async def test_metrics_content_type_and_series(async_client):
     values = _parse(resp.content.decode())
     assert set(values) >= EXPECTED_SERIES
     assert set(values) >= EXPECTED_LIGHTNING_SERIES
+
+
+@override_settings(FORECAST_ENABLED=True, METEOFRANCE_ENABLED=True)
+async def test_metric_names_follow_prometheus_conventions(async_client):
+    """``_total`` marks counters only. A gauge named ``_total`` that drops when
+    retention prunes rows reads as a counter reset and spikes every ``rate()``."""
+    text = (await async_client.get("/metrics")).content.decode()
+    types = _types(text)
+    assert types, "no # TYPE lines"
+    for family, kind in types.items():
+        if kind == "counter":
+            assert family.endswith("_total"), f"counter {family} must end in _total"
+        else:
+            assert not family.endswith("_total"), f"{kind} {family} must not end in _total"
+    # Every sample belongs to a declared family, so nothing is untyped.
+    for sample in _parse(text):
+        assert sample.split("{", 1)[0] in types, f"{sample} has no # TYPE"
+
+
+@override_settings(METEOFRANCE_ENABLED=True)
+async def test_per_provider_radar_series_have_no_unlabelled_twin(async_client):
+    """sum()/max() over ``provider`` must never double-count an aggregate twin."""
+    values = _parse((await async_client.get("/metrics")).content.decode())
+    global_families = {"radar_tile_dir_bytes", "radar_storage_used_ratio"}
+    for sample in values:
+        family = sample.split("{", 1)[0]
+        if family.startswith("radar_") and family not in global_families:
+            assert "provider=" in sample, f"{sample} lacks a provider label"
 
 
 async def test_metrics_reflect_lightning_state(async_client):
@@ -75,13 +111,13 @@ async def test_metrics_reflect_lightning_state(async_client):
     resp = await async_client.get("/metrics")
     values = _parse(resp.content.decode())
     assert values["lightning_strikes_total"] == "7"  # Redis counter
-    assert values["lightning_archived_total"] == "2"  # DB rows
+    assert values["lightning_strikes_stored"] == "2"  # DB rows
     assert values["lightning_strikes_24h"] == "2"
     assert values["lightning_ws_connected"] == "1"
     assert values["lightning_ws_reconnects_total"] == "1"
     assert values["lightning_queue_dropped_total"] == "3"
     assert values["lightning_last_strike_timestamp"] == "1718960400"
-    assert int(values["lightning_partitions_total"]) >= 1
+    assert int(values["lightning_partitions"]) >= 1
 
 
 async def test_metrics_reflect_seeded_rows(async_client):
@@ -107,21 +143,21 @@ async def test_metrics_reflect_seeded_rows(async_client):
         detail={},
     )
     await cache.set_tile_dir_bytes(4096)
-    await cache.set_last_poll("rainviewer", 123456)  # writes per-provider + global keys
+    await cache.set_last_poll("rainviewer", 123456)
 
     resp = await async_client.get("/metrics")
     values = _parse(resp.content.decode())
-    assert values["radar_frames_total"] == "2"
-    assert values["radar_frames_partial_total"] == "1"
-    assert values["radar_archive_gaps_total"] == "1"
-    assert values["radar_archive_gap_open"] == "1"
+    rv = '{provider="rainviewer"}'
+    assert values['radar_frames_stored{provider="rainviewer",status="ok"}'] == "1"
+    assert values['radar_frames_stored{provider="rainviewer",status="partial"}'] == "1"
+    assert values['radar_frames_stored{provider="rainviewer",status="failed"}'] == "0"  # zero-fill
+    assert values[f"radar_archive_gaps{rv}"] == "1"
+    assert values[f"radar_archive_gap_open{rv}"] == "1"
     assert values["radar_tile_dir_bytes"] == "4096"
-    assert values["radar_last_poll_timestamp"] == "123456"
-    assert values["radar_archive_earliest_timestamp"] == "1000"
-    assert values["radar_archive_latest_timestamp"] == "2000"
-    # Provider-labelled series land alongside the unlabelled ones.
-    assert values['radar_frames_archived_total{provider="rainviewer"}'] == "2"
-    assert values['radar_last_poll_timestamp{provider="rainviewer"}'] == "123456"
+    assert values[f"radar_last_poll_timestamp{rv}"] == "123456"
+    assert values[f"radar_archive_earliest_timestamp{rv}"] == "1000"
+    assert values[f"radar_archive_latest_timestamp{rv}"] == "2000"
+    assert "radar_last_poll_timestamp" not in values  # no unlabelled twin
 
 
 @override_settings(METEOFRANCE_ENABLED=True)
@@ -143,13 +179,35 @@ async def test_metrics_provider_labels_both_when_enabled(async_client):
     await cache.set_last_poll("rainviewer", 111)
     await cache.set_last_poll("meteofrance", 222)
 
+    await ArchiveGap.objects.acreate(
+        service="radar",
+        provider="meteofrance",
+        gap_start=datetime.fromtimestamp(1500, tz=UTC),
+        gap_end=None,
+        reason="ongoing",
+        detail={},
+    )
+
     values = _parse((await async_client.get("/metrics")).content.decode())
-    assert values['radar_frames_archived_total{provider="rainviewer"}'] == "1"
-    assert values['radar_frames_archived_total{provider="meteofrance"}'] == "1"
+    assert values['radar_frames_stored{provider="rainviewer",status="ok"}'] == "1"
+    assert values['radar_frames_stored{provider="meteofrance",status="ok"}'] == "1"
     assert values['radar_last_poll_timestamp{provider="rainviewer"}'] == "111"
     assert values['radar_last_poll_timestamp{provider="meteofrance"}'] == "222"
-    # The unlabelled series stays for dashboard continuity.
-    assert "radar_last_poll_timestamp" in values
+    # A Météo-France gap no longer looks like a RainViewer one.
+    assert values['radar_archive_gap_open{provider="meteofrance"}'] == "1"
+    assert values['radar_archive_gap_open{provider="rainviewer"}'] == "0"
+    assert values['radar_archive_gaps{provider="meteofrance"}'] == "1"
+    assert values['radar_archive_gaps{provider="rainviewer"}'] == "0"
+
+
+@override_settings(METEOFRANCE_ENABLED=False)
+async def test_disabled_provider_rows_add_no_series(async_client):
+    """Leftover rows of a provider turned off never add series until pruned."""
+    await RadarFrame.objects.acreate(
+        timestamp=2000, provider="meteofrance", tile_count=5, status="ok", missing=[]
+    )
+    values = _parse((await async_client.get("/metrics")).content.decode())
+    assert not any('provider="meteofrance"' in sample for sample in values)
 
 
 async def test_forecast_series_only_with_the_flag(async_client):
