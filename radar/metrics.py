@@ -1,12 +1,16 @@
 """Prometheus text exposition for ``GET /metrics``.
 
-Hand-rolled ``name value`` lines (no Prometheus client dependency), computed on
-request from cheap ``radar_frame`` / ``archive_gap`` queries plus the
-archiver-maintained Redis gauges (storage bytes, last poll).
+Hand-rolled ``name value`` lines (no Prometheus client dependency), computed from
+``radar_frame`` / ``archive_gap`` / ``lightning_strike`` aggregates plus the
+archiver-maintained Redis gauges (storage bytes, last poll). The endpoint is public,
+so :func:`exposition` caches and single-flights the render.
 """
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import time
 from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
@@ -25,6 +29,66 @@ from radar.models import RadarFrame
 from radar.providers import enabled_providers
 
 CONTENT_TYPE = "text/plain; version=0.0.4"
+
+# -- cached, single-flight exposition ------------------------------------------
+# Two layers keep a public, unthrottled-by-us scrape cadence off Postgres:
+# - Redis (``METRICS_CACHE_TTL``), shared by every web worker;
+# - a per-process memo with the same TTL, so a Redis outage (where every request
+#   used to re-render) still renders at most once per TTL per worker.
+# And a per-process lock so an expiry under concurrent requests renders ONCE per
+# worker instead of once per request (the stampede). Loop-bound like
+# ``radar.cache.get_client``: an asyncio primitive belongs to its creating loop, and
+# WSGI ``runserver`` makes a fresh loop per request.
+
+_lock: asyncio.Lock | None = None
+_lock_loop: asyncio.AbstractEventLoop | None = None
+_memo: tuple[float, bytes] | None = None  # (_clock() expiry, exposition)
+_clock = time.monotonic  # indirection so tests can move time without touching the loop's clock
+
+
+def _lock_for_loop() -> asyncio.Lock:
+    global _lock, _lock_loop  # noqa: PLW0603
+    loop = asyncio.get_running_loop()
+    if _lock is None or _lock_loop is not loop:
+        _lock = asyncio.Lock()
+        _lock_loop = loop
+    return _lock
+
+
+def reset_memo() -> None:
+    """Drop the per-process memo (tests; the Redis layer is flushed separately)."""
+    global _memo  # noqa: PLW0603
+    _memo = None
+
+
+def _fresh_memo() -> bytes | None:
+    if _memo is not None and _clock() < _memo[0]:
+        return _memo[1]
+    return None
+
+
+async def _from_redis() -> bytes | None:
+    try:
+        return await cache.get_metrics_text()
+    except Exception:  # noqa: BLE001 — Redis hiccup: fall through to the memo/render
+        return None
+
+
+async def exposition() -> bytes:
+    """The exposition text, rendered at most once per TTL per worker process."""
+    global _memo  # noqa: PLW0603
+    if (text := _fresh_memo()) is not None or (text := await _from_redis()) is not None:
+        return text
+    async with _lock_for_loop():
+        # Re-check: a request that held the lock just filled one of the layers.
+        if (text := _fresh_memo()) is not None or (text := await _from_redis()) is not None:
+            return text
+        text = (await render()).encode()
+        _memo = (_clock() + settings.METRICS_CACHE_TTL, text)
+        with contextlib.suppress(Exception):  # the Redis layer is best-effort
+            await cache.set_metrics_text(text, settings.METRICS_CACHE_TTL)
+        return text
+
 
 # Frame statuses, always emitted (zero-filled) so a series never vanishes mid-graph.
 _FRAME_STATUSES = ("ok", "partial", "failed")

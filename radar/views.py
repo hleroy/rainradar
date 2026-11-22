@@ -827,22 +827,11 @@ async def stats(request: HttpRequest) -> HttpResponse:
 async def metrics(_request: HttpRequest) -> HttpResponse:
     """GET /metrics — Prometheus text exposition.
 
-    Redis-cached (``METRICS_CACHE_TTL``) like /api/stats: the exposition runs a
-    dozen aggregates including a full COUNT(*) over the partitioned
-    lightning_strike table, and the endpoint is public — without the cache every
-    scrape (or hammering client) would hit Postgres directly.
+    Public by design, so the render (a dozen aggregates incl. a full COUNT(*) over
+    the partitioned lightning_strike table) is cached and single-flight — see
+    :func:`radar.metrics.exposition`. Nginx rate-limits the location as well.
     """
-    try:
-        cached = await cache.get_metrics_text()
-    except Exception:  # noqa: BLE001 — Redis hiccup: recompute below
-        cached = None
-    if cached is not None:
-        return HttpResponse(cached, content_type=metrics_text.CONTENT_TYPE)
-
-    text = await metrics_text.render()
-    with contextlib.suppress(Exception):  # caching is best-effort
-        await cache.set_metrics_text(text.encode(), settings.METRICS_CACHE_TTL)
-    return HttpResponse(text, content_type=metrics_text.CONTENT_TYPE)
+    return HttpResponse(await metrics_text.exposition(), content_type=metrics_text.CONTENT_TYPE)
 
 
 # -- health -------------------------------------------------------------------

@@ -51,6 +51,7 @@ def _clean_state():
     import redis as sync_redis  # noqa: PLC0415
 
     from radar import cache  # noqa: PLC0415
+    from radar import metrics  # noqa: PLC0415
     from radar import providers  # noqa: PLC0415
     from radar.forecast import job as forecast_job  # noqa: PLC0415
     from radar.forecast import render as forecast_render  # noqa: PLC0415
@@ -60,6 +61,9 @@ def _clean_state():
     def _reset():
         providers._instances.clear()
         cache._client = None
+        # /metrics' per-process memo would otherwise serve one test's exposition to
+        # the next (the Redis layer is flushed below).
+        metrics.reset_memo()
         # Process-wide and keyed by GridGeo, so a test's synthetic grid would otherwise
         # leak index arrays into the next one. Every module that renders tiles needs
         # this, not just test_meteofrance_render.
