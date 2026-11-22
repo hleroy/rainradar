@@ -127,9 +127,15 @@ async def archive_frame(provider, ts: int) -> RadarFrame:
         if data is None:
             empty.add((z, x, y))  # empty region (404) — store nothing, remember it
             return
-        await sync_to_async(storage.write_tile)(provider.name, ts, z, x, y, data, date=date)
+        # Disk usage, not len(data): the gauge measures allocated blocks, like the
+        # rescan (which also adds the directories these writes create). Awaited into
+        # a local first: ``bytes_written += await …`` would read the shared total
+        # *before* suspending, so concurrent tiles would overwrite each other's sums.
+        size = await sync_to_async(storage.write_tile_sized)(
+            provider.name, ts, z, x, y, data, date=date
+        )
+        bytes_written += size
         written += 1
-        bytes_written += len(data)
 
     # One pooled client per frame: the 62 tile fetches reuse keep-alive instead
     # of re-handshaking TLS per tile.

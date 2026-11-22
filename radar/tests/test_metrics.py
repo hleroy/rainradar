@@ -102,6 +102,15 @@ async def test_per_provider_radar_series_have_no_unlabelled_twin(async_client):
             assert "provider=" in sample, f"{sample} lacks a provider label"
 
 
+@override_settings(STORAGE_BUDGET_BYTES=4096)
+async def test_storage_ratio_is_gauge_over_budget(async_client):
+    # A 0..1 share of the configured budget, and the only thing the budget feeds.
+    await cache.set_tile_dir_bytes(3072)
+    values = _parse((await async_client.get("/metrics")).content.decode())
+    assert values["radar_tile_dir_bytes"] == "3072"
+    assert values["radar_storage_used_ratio"] == "0.750000"
+
+
 async def test_metrics_reflect_lightning_state(async_client):
     await LightningStrike.objects.all().adelete()
     now = datetime.now(tz=UTC)

@@ -580,12 +580,32 @@ publish would let runs that keep failing part-way fill the shared volume unseen.
 
 ### 6.3 Storage budget
 
-Provisioned volume is 20 GiB (`STORAGE_CAPACITY_BYTES`), which backs the
-`radar_storage_used_ratio` metric; the host alerting stack warns at 75 %. Radar tiles
-dominate; lightning rows, Redis and Postgres overhead are rounding errors beside them.
-Enabling the reflectivity wash costs additional disk, since more tiles are non-empty.
-The forecast costs a few tens of MB at most (three runs of ~10–16 MB), outside
-`TILE_ROOT` and so outside the storage gauge.
+There is no provisioned volume. `production_radar_tiles` is an uncapped Docker named
+volume on the host's `/data` filesystem, which other stacks share, so the hard limit is
+that disk's free space. The archive gets a **budget**, `STORAGE_BUDGET_BYTES` (64 GiB, a
+settings constant overridden per environment). `radar_storage_used_ratio` is
+`radar_tile_dir_bytes` over that budget, a 0–1 share, and the host alerting stack warns
+at 75 %. The host's own disk monitoring watches `/data` itself.
+
+**The gauge measures disk usage, not content.** `radar_tile_dir_bytes` sums allocated
+blocks (`st_blocks × 512`) of every file *and directory* under `TILE_ROOT`, which is what
+`du -s` reports. The archive is millions of PNGs averaging ~16 KB, each rounded up to
+whole blocks, plus a directory for every frame, zoom and column. Summing `st_size`
+instead undercounts by roughly a fifth. The per-poll increment adds each written tile's
+own block count. The rescan at startup and in the daily janitor (§7.3) also adds the
+directories and the fallback view's writes. Polls landing mid-rescan drift the value by
+at most the bytes they wrote, a few MB.
+
+**Sizing.** Retention is 90 days and the matrix is 62 tiles. RainViewer stores all 62
+tiles of every frame whatever the weather: 144 frames a day, so 8,928 tiles a day. Météo-France
+stores only non-empty tiles: 10.8k–15.8k of its 17,856 possible per day were observed in
+October and November 2026. That is ~2.0M files at steady state, ~30.7 GiB apparent
+(November 2026) and ~37 GiB on disk. At most ~20 % more tiles can exist. Dense echoes
+compress worse, though, so a sustained wet season is estimated at ~40–45 GiB apparent,
+**~50 GiB on disk** (≈ 0.78 of the budget). Enabling the reflectivity wash pushes
+Météo-France toward the full matrix. Lightning rows, Redis and Postgres overhead are
+rounding errors beside the tiles. The forecast costs a few tens of MB at most (three
+runs of ~10–16 MB), outside `TILE_ROOT` and so outside the gauge.
 
 ---
 
@@ -655,7 +675,8 @@ Runs daily at `JANITOR_HOUR` UTC and is safe as a no-op:
 - drop lightning month partitions past the horizon;
 - prune push subscriptions untouched past `PUSH_STALE_DAYS`;
 - reconcile the storage gauge with a full rescan, correcting the drift that accumulates
-  from the O(1) per-poll increments.
+  from the O(1) per-poll increments (which miss new directories and the fallback view's
+  writes, §6.3).
 
 The lightning and push clauses are individually caught and logged: a failure in either
 must never fail radar retention.
@@ -1408,7 +1429,7 @@ alert rules live on the host observability stack, alongside the existing Traefik
 alert conditions this instrumentation is designed to support: a gap opened (alert), radar
 fetch failed three times (warning), sustained upstream 429 throttling (warning — the
 concurrency cap may need lowering, §5.3), Blitzortung disconnected for more than five
-minutes (critical), and storage above 75 % of capacity. With the forecast on, a run
+minutes (critical), and storage above 75 % of its budget (§6.3). With the forecast on, a run
 older than ~20 minutes (`time() - forecast_run_timestamp > 1200`) means the advert has
 gone empty and is worth a warning; a rising `forecast_rejected_total` means PIAF's
 payload drifted and the decoder is refusing it, as designed; a rising

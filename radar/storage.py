@@ -112,6 +112,24 @@ def write_tile(  # noqa: PLR0913, PLR0917 — provider + tile coords + payload a
     return _atomic_write(tile_path(provider, ts, z, x, y, date=date), data)
 
 
+def write_tile_sized(  # noqa: PLR0913, PLR0917 — same inputs as write_tile
+    provider: str,
+    ts: int,
+    z: int,
+    x: int,
+    y: int,
+    data: bytes,
+    *,
+    date: str | None = None,
+) -> int:
+    """``write_tile``, returning the tile's disk usage (``disk_bytes``) for the gauge.
+
+    One call, so the archiver pays a single ``sync_to_async`` hop per tile for the
+    write and the ``stat`` together.
+    """
+    return disk_bytes(write_tile(provider, ts, z, x, y, data, date=date))
+
+
 def _atomic_write(final: Path, data: bytes) -> Path:
     """Write ``data`` to ``final`` via a unique temp name + rename (never half-visible)."""
     final.parent.mkdir(parents=True, exist_ok=True)
@@ -143,23 +161,38 @@ def provider_dirs() -> list[str]:
     return sorted(p.name for p in root.iterdir() if p.is_dir() and not DATE_DIR_RE.match(p.name))
 
 
+def disk_bytes(path: str | os.PathLike) -> int:
+    """Bytes ``path`` actually occupies on disk (allocated blocks, not ``st_size``).
+
+    The archive is millions of small PNGs, each rounded up to whole filesystem
+    blocks, plus a directory inode per frame/zoom/column — so the apparent size
+    undercounts real usage by roughly a fifth. ``st_blocks`` is always in 512-byte
+    units, whatever the filesystem's block size. Raises ``OSError`` if it is gone.
+    """
+    return os.lstat(path).st_blocks * 512
+
+
 def dir_size(path: Path) -> int:
-    """Total size in bytes of all files under ``path`` (0 if it doesn't exist)."""
+    """Disk usage in bytes of ``path`` and everything under it (0 if it doesn't exist).
+
+    Counts allocated blocks of every file **and directory** (see ``disk_bytes``), so
+    it matches what ``du -s`` reports and what the shared disk actually loses.
+    """
     if not path.exists():
         return 0
     total = 0
     for dirpath, _dirnames, filenames in os.walk(path):
-        for name in filenames:
-            fp = Path(dirpath) / name
+        base = Path(dirpath)
+        for entry in (base, *(base / name for name in filenames)):
             try:
-                total += fp.stat().st_size
-            except OSError:  # file vanished mid-walk (concurrent janitor) — skip
+                total += disk_bytes(entry)
+            except OSError:  # vanished mid-walk (concurrent janitor) — skip
                 continue
     return total
 
 
 def tile_tree_bytes() -> int:
-    """Total bytes of the whole tile archive across all providers (storage gauge)."""
+    """Disk usage of the whole tile archive across all providers (storage gauge)."""
     return dir_size(tile_root())
 
 

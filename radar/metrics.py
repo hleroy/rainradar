@@ -144,8 +144,8 @@ async def render() -> str:
     last_poll = {name: await cache.get_last_poll(name) for name in providers}
 
     tile_bytes = await cache.get_tile_dir_bytes()
-    capacity = settings.STORAGE_CAPACITY_BYTES
-    used_ratio = (tile_bytes / capacity) if capacity else 0.0
+    budget = settings.STORAGE_BUDGET_BYTES
+    used_ratio = (tile_bytes / budget) if budget else 0.0
 
     lines = [
         *_gauge(
@@ -188,12 +188,12 @@ async def render() -> str:
         ),
         *_gauge(
             "radar_tile_dir_bytes",
-            "Tile archive size on disk, all providers (bytes).",
+            "Tile archive disk usage, all providers (allocated bytes, incl. directories).",
             [("", tile_bytes)],
         ),
         *_gauge(
             "radar_storage_used_ratio",
-            "tile_dir_bytes / STORAGE_CAPACITY_BYTES.",
+            "radar_tile_dir_bytes / STORAGE_BUDGET_BYTES (the archive's share of the host disk).",
             [("", f"{used_ratio:.6f}")],
         ),
     ]
