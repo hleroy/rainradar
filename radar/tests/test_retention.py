@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import threading
 from datetime import UTC
 from datetime import date
 from datetime import datetime
@@ -163,3 +165,36 @@ async def test_janitor_drops_old_lightning_partitions(tile_root):
     assert partitions.DEFAULT_PARTITION in remaining  # never dropped
     current = partitions._partition_name(partitions.current_month_utc())
     assert current in remaining  # current month survives
+
+
+@pytest.mark.parametrize(
+    ("module", "attr", "result"),
+    [
+        (archiver, "_purge_old_day_dirs", (0, 0)),  # the rmtree of aged-out day dirs
+        (storage, "tile_tree_bytes", 0),  # the full-archive gauge rescan
+    ],
+)
+async def test_janitor_disk_work_never_holds_the_shared_sync_thread(
+    tile_root, monkeypatch, module, attr, result
+):
+    """The janitor's multi-minute disk walks must not run on the single shared
+    ``sync_to_async`` thread: every tile check/write and async ORM call (incl.
+    lightning inserts) queues there, so holding it stalls every other job."""
+    entered = threading.Event()
+    release = threading.Event()
+
+    def blocked(*_a, **_k):
+        entered.set()
+        release.wait(timeout=10)
+        return result
+
+    monkeypatch.setattr(module, attr, blocked)
+    janitor = asyncio.create_task(archiver.retention_janitor())
+    try:
+        assert await asyncio.to_thread(entered.wait, 5), "janitor never reached the disk work"
+        # While the disk work is still blocked, the shared thread must stay free.
+        probe = await asyncio.wait_for(sync_to_async(lambda: "free")(), timeout=2)
+        assert probe == "free"
+    finally:
+        release.set()
+        await janitor

@@ -92,7 +92,7 @@ class MeteoFranceAuth:
                         headers=headers,
                     )
                 except (httpx.TimeoutException, httpx.TransportError) as exc:
-                    logger.warning("Météo-France token fetch error: %s", exc)
+                    logger.warning("Météo-France token fetch error: %r", exc)
                 else:
                     if resp.status_code == httpx.codes.OK:
                         return self._parse_token(resp)

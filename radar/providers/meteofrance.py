@@ -263,7 +263,7 @@ class MeteoFranceProvider:
                 except AuthError:
                     logger.warning("Météo-France token unavailable for catalog fetch")
                 except (httpx.TimeoutException, httpx.TransportError) as exc:
-                    logger.warning("Météo-France catalog fetch error: %s", exc)
+                    logger.warning("Météo-France catalog fetch error: %r", exc)
                 else:
                     if resp.status_code == httpx.codes.OK:
                         return resp.content
@@ -534,7 +534,7 @@ class MeteoFranceProvider:
                 token = await self._auth.get_token()
                 resp = await client.get(ref, headers={"Authorization": f"Bearer {token}"})
             except (httpx.TimeoutException, httpx.TransportError) as exc:
-                logger.warning("Météo-France product fetch error: %s", exc)
+                logger.warning("Météo-France product fetch error: %r", exc)
             else:
                 if resp.status_code == httpx.codes.OK:
                     return resp.content

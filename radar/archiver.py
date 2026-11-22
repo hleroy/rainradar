@@ -434,7 +434,10 @@ async def _reset_failures(provider_name: str) -> None:
 
 
 async def update_storage_gauge() -> int:
-    size = await sync_to_async(storage.tile_tree_bytes)()
+    # Full archive walk — minutes on a cold page cache. Filesystem-only, so it runs
+    # on a pool thread, never on the single shared ``sync_to_async`` thread that
+    # every tile check/write and async ORM call (incl. lightning inserts) queues on.
+    size = await asyncio.to_thread(storage.tile_tree_bytes)
     await cache.set_tile_dir_bytes(size)
     return size
 
@@ -469,7 +472,10 @@ async def retention_janitor() -> dict:
     now = datetime.now(tz=UTC)
     cutoff_date = (now - timedelta(days=settings.RETENTION_DAYS)).date()
 
-    deleted_days, freed = await sync_to_async(_purge_old_day_dirs)(cutoff_date)
+    # rmtree of whole day dirs (tens of thousands of files): filesystem-only, so off
+    # the shared sync_to_async thread for the same reason as update_storage_gauge —
+    # otherwise every poll, forecast and lightning DB write stalls behind it.
+    deleted_days, freed = await asyncio.to_thread(_purge_old_day_dirs, cutoff_date)
 
     # Rows whose UTC date is strictly before the cutoff day (ts < cutoff midnight).
     cutoff_midnight = datetime(cutoff_date.year, cutoff_date.month, cutoff_date.day, tzinfo=UTC)
