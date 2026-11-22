@@ -17,6 +17,7 @@ from django.test import override_settings
 
 from radar import archiver
 from radar import cache
+from radar import storage
 from radar.models import ArchiveGap
 from radar.models import RadarFrame
 from radar.providers import get_active_provider
@@ -246,8 +247,13 @@ async def test_poll_increments_storage_gauge(tile_root, sample_weather_maps, png
     assert await cache.get_tile_dir_bytes() == 0
     await archiver.poll_radar(provider)
 
-    # 3 frames * 62 tiles * the PNG size, accumulated via INCRBY (no rescan).
-    assert await cache.get_tile_dir_bytes() == 3 * MATRIX_SIZE * len(png_bytes)
+    # 3 frames * 62 tiles, each counted at its allocated disk usage (not len(data)),
+    # accumulated via INCRBY (no rescan). The directories are the rescan's to add.
+    tile_files = sorted(tile_root.rglob("*.png"))
+    assert len(tile_files) == 3 * MATRIX_SIZE
+    expected = sum(storage.disk_bytes(p) for p in tile_files)
+    assert expected >= len(tile_files) * len(png_bytes)
+    assert await cache.get_tile_dir_bytes() == expected
 
 
 @respx.mock

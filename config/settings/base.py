@@ -332,8 +332,12 @@ STATS_CACHE_TTL = 60
 # is public, so scrape cadence is not under our control. Keep it below the
 # scraper's interval so every scrape still observes fresh-enough values.
 METRICS_CACHE_TTL = 30
-# 20 GiB; backs the radar_storage_used_ratio metric.
-STORAGE_CAPACITY_BYTES = 21474836480
+# The tile archive's disk budget (64 GiB): radar_storage_used_ratio is
+# radar_tile_dir_bytes over this. Not a volume size — production_radar_tiles is an
+# uncapped named volume on the host's shared /data disk, so this is the share of it
+# the archive may use (design doc §6.3; steady state ~37 GiB, wet-season worst case
+# ~50 GiB, alert at 75 %). Override per environment in local.py / production.py.
+STORAGE_BUDGET_BYTES = 64 * 1024**3
 TILE_FETCH_CONCURRENCY = 8
 # Process-wide ceiling on *simultaneous* upstream tile fetches, shared across the
 # archiver's batch and the on-demand view path. RainViewer's free tier 429s under
