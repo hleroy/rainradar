@@ -182,6 +182,48 @@ async def test_malformed_token_body_raises_auth_error():
         await auth.get_token()
 
 
+@_MF
+@respx.mock
+async def test_failed_refresh_fails_fast_during_cooldown(monkeypatch):
+    """Right after a refresh gives up, the next caller gets AuthError with no POST."""
+    monkeypatch.setattr(meteofrance_auth.asyncio, "sleep", _noop)
+    route = respx.post(TOKEN_URL).mock(side_effect=httpx.ConnectError("name resolution"))
+    auth = MeteoFranceAuth()
+    with pytest.raises(AuthError):
+        await auth.get_token()
+    ladder = route.call_count
+    with pytest.raises(AuthError):
+        await auth.get_token()
+    assert route.call_count == ladder  # no second retry ladder
+
+
+@_MF
+@respx.mock
+async def test_callers_queued_behind_a_failing_refresh_share_its_failure(monkeypatch):
+    """N concurrent callers on a dead endpoint ⇒ one retry ladder, not N."""
+    monkeypatch.setattr(meteofrance_auth.asyncio, "sleep", _noop)
+    route = respx.post(TOKEN_URL).mock(return_value=httpx.Response(503))
+    auth = MeteoFranceAuth()
+    results = await asyncio.gather(*(auth.get_token() for _ in range(8)), return_exceptions=True)
+    assert all(isinstance(r, AuthError) for r in results)
+    assert route.call_count == len(meteofrance_auth._BACKOFFS) + 1
+
+
+@_MF
+@respx.mock
+async def test_refresh_retries_once_the_cooldown_has_passed(monkeypatch):
+    monkeypatch.setattr(meteofrance_auth.asyncio, "sleep", _noop)
+    monkeypatch.setattr(meteofrance_auth, "_FAILURE_COOLDOWN_S", 0.0)  # already elapsed
+    route = respx.post(TOKEN_URL).mock(
+        side_effect=[httpx.Response(401), httpx.Response(200, json={"access_token": "tok-ok"})],
+    )
+    auth = MeteoFranceAuth()
+    with pytest.raises(AuthError):
+        await auth.get_token()
+    assert await auth.get_token() == "tok-ok"
+    assert route.call_count == 2
+
+
 # -- frames: latest-only description parse -------------------------------------
 
 
