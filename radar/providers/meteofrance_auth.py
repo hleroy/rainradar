@@ -6,6 +6,13 @@ Refresh is single-flight — N concurrent callers produce exactly one token POST
 via a loop-bound ``asyncio.Lock`` rebuilt when the running loop changes, mirroring
 :func:`radar.cache.get_client` (uvicorn keeps one loop; WSGI runserver does not).
 
+A failed refresh is remembered for ``_FAILURE_COOLDOWN_S``: callers in that window
+(the observation poll, every forecast lead, the callers queued on the lock behind
+the failure) get ``AuthError`` at once instead of each running its own retry
+ladder. Without it a long outage multiplied token POSTs — the 2026-11-24 DNS outage
+logged ~960 failed fetches an hour — and a real token-endpoint outage would get
+the same burst.
+
 Never logs the token or the application ID.
 """
 
@@ -27,6 +34,9 @@ _BACKOFFS = (0.5, 1.0, 2.0)  # 3 retries
 _BACKOFF_JITTER = 0.25  # de-synchronise a burst that all refreshed on the same tick
 _REFRESH_MARGIN_S = 60  # refresh this long before the real expiry (safety margin)
 _DEFAULT_TTL_S = 3600  # fallback if the token response omits expires_in
+# Fail fast for this long after a refresh gives up. Under the 60 s observation poll,
+# so the next poll after a blip always tries again: recovery costs at most one poll.
+_FAILURE_COOLDOWN_S = 30.0
 
 
 class AuthError(Exception):
@@ -37,6 +47,7 @@ class MeteoFranceAuth:
     def __init__(self) -> None:
         self._token: str | None = None
         self._expires_at: float = 0.0  # monotonic-clock deadline
+        self._failed_until: float = 0.0  # monotonic; refresh skipped (AuthError) before this
         self._lock: asyncio.Lock | None = None
         self._lock_loop: asyncio.AbstractEventLoop | None = None
 
@@ -59,7 +70,14 @@ class MeteoFranceAuth:
             # Re-check under the lock: another caller may have refreshed while we waited.
             if self._valid():
                 return self._token  # type: ignore[return-value]
-            self._token, self._expires_at = await self._refresh()
+            if time.monotonic() < self._failed_until:
+                raise AuthError  # a refresh just gave up: don't run another ladder yet
+            try:
+                self._token, self._expires_at = await self._refresh()
+            except AuthError:
+                self._failed_until = time.monotonic() + _FAILURE_COOLDOWN_S
+                raise
+            self._failed_until = 0.0
             return self._token
 
     async def invalidate(self, stale: str) -> None:
